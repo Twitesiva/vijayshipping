@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
 
-import { LayoutDashboard, ClipboardList, LogOut, UserRound, Menu, Users, ChevronDown, ChevronRight, Fingerprint } from "lucide-react";
+import { LayoutDashboard, ClipboardList, LogOut, UserRound, Menu, Users, ChevronDown, ChevronRight } from "lucide-react";
 
 const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
 
