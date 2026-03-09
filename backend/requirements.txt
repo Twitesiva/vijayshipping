@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-dotenv
+supabase
+pydantic-settings
+python-multipart
+googlemaps
+numpy
+torch
+opencv-python
+facenet-pytorch
+requests
+geopy

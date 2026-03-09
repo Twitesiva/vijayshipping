@@ -1,0 +1,783 @@
+// src/pages/auth/Login.jsx
+import { useRef, useState, useEffect, forwardRef } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  AlertTriangle,
+  Clock,
+} from "lucide-react";
+
+import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
+import { MANAGER_SESSION_KEY } from "../manager/managerData";
+import { ensureAdminSupabaseSession } from "../../lib/employeeAuthBridge";
+
+import Preloader from "../../components/Preloader";
+
+const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
+const ATTENDANCE_AUTH_KEY = "HRMSS_ATTENDANCE_AUTH";
+
+const Field = forwardRef(
+  (
+    { icon: Icon, type = "text", placeholder, right, autoComplete, required },
+    ref
+  ) => {
+    return (
+      <div className="flex items-center gap-3 border-b border-gray-300 pb-2 focus-within:border-[#598791] transition">
+        <span className="text-[#598791] pointer-events-none">
+          <Icon size={18} />
+        </span>
+
+        <input
+          ref={ref}
+          type={type}
+          placeholder={placeholder}
+          autoComplete={autoComplete}
+          required={required}
+          className="flex-1 min-w-0 w-full bg-transparent outline-none text-sm text-gray-800 placeholder:text-gray-400"
+        />
+
+        {right}
+      </div>
+    );
+  }
+);
+Field.displayName = "Field";
+
+
+
+/* ---------------- Login ---------------- */
+export default function Login() {
+  const navigate = useNavigate();
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
+  // Unified refs for auto-detection login
+  const emailRef = useRef(null);
+  const passRef = useRef(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      emailRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
+
+  const clearInputs = () => {
+    setErr("");
+    if (emailRef.current) emailRef.current.value = "";
+    if (passRef.current) passRef.current.value = "";
+  };
+
+  const roleRedirects = {
+    hr: "/hr-dashboard",
+    manager: "/manager-dashboard",
+    admin: "/dashboard",
+    employee: "/employee-dashboard",
+    founder: "/founder-dashboard",
+  };
+
+  const MANAGER_COMPLETION_KEY = "hrmss.signin.completed.manager";
+
+  // ✅ completion keys for all roles (used by Sign-In + Guard)
+  const COMPLETION_KEY = (r) => `hrmss.signin.completed.${r}`;
+  const isCompleted = (r) => localStorage.getItem(COMPLETION_KEY(r)) === "true";
+
+  // ✅ Shared helper to prefer verify_login_json for all roles
+  const tryVerifyLoginJson = async (params) => {
+    try {
+      const session = await rpcVerifyApp(params);
+      return session || null;
+    } catch (err) {
+      console.warn(
+        `[Login] verify_login_json failed for role ${params?.p_role}:`,
+        err?.message
+      );
+      return null;
+    }
+  };
+
+
+
+  /* ---------------- RPC HELPERS ---------------- */
+
+  // ✅ HR/Admin login RPC (JSON)
+  const rpcVerifyApp = async ({
+    p_role,
+    p_identifier,
+    p_admin_id = null,
+    p_secret,
+  }) => {
+    if (!isSupabaseConfigured) {
+      throw new Error(
+        "Supabase env missing. Check VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY"
+      );
+    }
+
+    const { data, error } = await supabase.rpc("verify_login_json", {
+      p_role,
+      p_identifier,
+      p_admin_id,
+      p_secret,
+    });
+
+    if (error) throw new Error(error.message || "Login failed");
+    if (!data) throw new Error("Invalid credentials");
+
+
+    // ✅ Don't expose internal errors like "role mismatch" - show generic message
+    if (data.error) {
+      console.error("Login error (internal):", data.error); // Log for debugging
+      throw new Error("Invalid credentials or access denied");
+    }
+
+    return data;
+  };
+
+  const rpcManagerLogin = async ({ p_email, p_password }) => {
+    if (!isSupabaseConfigured) {
+      throw new Error(
+        "Supabase env missing. Check VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY"
+      );
+    }
+
+    // 1. Try normal login
+    const { data, error } = await supabase.rpc("manager_login_js", {
+      p_email,
+      p_password,
+    });
+
+    if (error) throw new Error(error.message || "Founder login failed");
+
+    // 2. If valid data, return it
+    if (data) return data;
+
+    // 3. If login failed, run debug helper for console tracing only
+    try {
+      const { data: debugMsg, error: debugErr } = await supabase.rpc(
+        "debug_login_check",
+        {
+          p_email,
+          p_password,
+          p_role: "manager",
+        }
+      );
+
+      if (debugErr) {
+        console.error("Debug tool error:", debugErr);
+      } else if (debugMsg) {
+        console.debug("Manager login debug info:", debugMsg);
+      }
+    } catch (e) {
+      console.error("Debug execution failed:", e);
+    }
+
+    throw new Error("Invalid email or password");
+  };
+
+  // ✅ Check HR/Admin/Manager profile exists in employees table
+  const appProfileExists = async (userId, email) => {
+    const uid = String(userId || "").trim();
+    const mail = String(email || "").trim();
+    if (!uid && !mail) return false;
+
+    // Use or() to check both id and employee_id/email to handle different table schemas
+    // This avoids 400 error code if 'id' is a UUID and we pass a string code.
+    let query = supabase.from("employees").select("id");
+
+    if (uid && uid.length > 20) {
+      // Looks like a UUID
+      query = query.eq("id", uid);
+    } else if (uid) {
+      query = query.eq("employee_id", uid);
+    } else {
+      query = query.eq("email", mail);
+    }
+
+    const { data, error } = await query.maybeSingle();
+
+    if (error) {
+      console.warn("Profile check failed (non-critical):", error.message);
+      return false;
+    }
+    return !!data;
+  };
+
+  // ✅ Check Employee profile completion in hrms_employee_profile
+  const employeeProfileCompleted = async (employeeId, email) => {
+    const empId = String(employeeId || "").trim();
+    const empEmail = String(email || "").trim();
+    if (!empId && !empEmail) return false;
+
+    let query = supabase
+      .from("hrms_employee_profile")
+      .select("id, profile_completed");
+
+    if (empId) {
+      query = query.eq("employee_id", empId);
+    } else {
+      query = query.or(
+        `official_email.eq.${empEmail},personal_email.eq.${empEmail}`
+      );
+    }
+
+    const { data, error } = await query.maybeSingle();
+
+    if (error) {
+      console.warn("Profile check failed:", error.message);
+      return false;
+    };
+    return !!data?.profile_completed;
+  };
+
+  // ✅ Fetch designation from the 'employees' table (robust lookup)
+  const fetchUserDesignation = async (idOrCode) => {
+    if (!idOrCode) return "";
+    try {
+      const code = String(idOrCode).trim();
+
+      // 1. Try employees table by employee_id string (most common, e.g. F0001)
+      const { data: empData } = await supabase
+        .from("employees")
+        .select("designation")
+        .eq("employee_id", code)
+        .maybeSingle();
+
+      if (empData?.designation) return empData.designation;
+
+      // 2. If length > 20, it's likely a UUID, try employees table by id
+      if (code.length > 20) {
+        const { data: empDataUuid } = await supabase
+          .from("employees")
+          .select("designation")
+          .eq("id", code)
+          .maybeSingle();
+        if (empDataUuid?.designation) return empDataUuid.designation;
+      }
+
+      return "";
+    } catch (e) {
+      console.warn("[Login] fetchUserDesignation non-critical error:", e.message);
+      return "";
+    }
+  };
+
+  /* ---------------- SUPABASE AUTH BRIDGE (FOR DOCUMENTS) ---------------- */
+
+  const persistDocsAuth = (params) => {
+    if (!params?.password) return;
+    const payload = {
+      role: params?.role || "",
+      identifier: params?.identifier || "",
+      preferredEmail: params?.preferredEmail || "",
+      password: params?.password || "",
+    };
+    try {
+      sessionStorage.setItem(DOCS_AUTH_KEY, JSON.stringify(payload));
+    } catch {
+      try {
+        localStorage.setItem(DOCS_AUTH_KEY, JSON.stringify(payload));
+      } catch { }
+    }
+  };
+
+
+
+  // ✅ Don’t break app login if bridge fails; only log a warning.
+  const tryEnsureSupabaseForDocs = async (params, roleLabelForError = "") => {
+    try {
+      persistDocsAuth(params);
+      await ensureAdminSupabaseSession(params);
+
+
+      // mark ok
+      const k = `hrmss.supabase.docsAuth.ok.${params?.role || "unknown"}`;
+      localStorage.setItem(k, "true");
+      return true;
+    } catch (e) {
+      const k = `hrmss.supabase.docsAuth.ok.${params?.role || "unknown"}`;
+      localStorage.setItem(k, "false");
+
+
+      // Keep app login working, only warn in console. 
+      // Background sync is secondary to app-level RPC login.
+      console.warn(`[DocsAuth] Background sync warning for ${roleLabelForError || "user"}:`, e.message);
+
+      return false;
+    }
+  };
+
+  /* ---------------- SUBMIT (LOGIN) ---------------- */
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErr("");
+
+    const email = emailRef.current?.value?.trim() || "";
+    const password = passRef.current?.value?.trim() || "";
+
+    if (!email || !password) {
+      setErr("Enter email and password");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // --- 1. Try FOUNDER/MANAGER Login ---
+      let managerData = null;
+
+      try {
+        const m = await rpcManagerLogin({ p_email: email, p_password: password });
+        const access = String(m.access || m.role || "viewer").toLowerCase();
+        const empId = m.manager_code || m.id || "MGR";
+        const emailPrefix = email.split("@")[0].toUpperCase();
+
+        // Look up employees table by EMAIL (case-insensitive) or by ID prefix (e.g. F0001)
+        const { data: empByEmailMgr } = await supabase
+          .from("employees")
+          .select("employee_id, designation")
+          .or(`email.ilike.${email},employee_id.eq.${emailPrefix}`)
+          .maybeSingle();
+
+        // Use manager_code for DB lookup (string like F0001), not UUID
+        const designationLookupId = empByEmailMgr?.employee_id || m.manager_code || empId;
+
+        // Parallelize fetching designation and checking profile
+        const [dbDesignationRaw, profileExistsRaw] = await Promise.all([
+          fetchUserDesignation(designationLookupId),
+          appProfileExists(empId, email)
+        ]);
+
+        const dbDesignation = (empByEmailMgr?.designation || dbDesignationRaw || m.designation || "").toLowerCase();
+        const idLower = String(empByEmailMgr?.employee_id || m.manager_code || empId || "").toLowerCase();
+        const mailLower = String(email || m.email || "").toLowerCase();
+        const mRoleLower = String(m.role || "").toLowerCase();
+
+        const isFnd = dbDesignation.includes("founder") ||
+          dbDesignation.includes("boss") ||
+          mailLower.includes("founder") ||
+          mailLower.startsWith("founder") ||
+          idLower === "founder" ||
+          idLower.startsWith("fnd") ||
+          idLower.startsWith("f0") ||
+          mRoleLower === "founder" ||
+          mRoleLower === "boss";
+
+        console.log("[Login] Manager/Founder detection:", {
+          empId, designationLookupId, empByEmailMgr, dbDesignation,
+          mRole: m.role, mailLower, idLower, isFnd
+        });
+        const isManagerOrFnd = isFnd ||
+          dbDesignation.includes("manager") ||
+          dbDesignation.includes("hr") ||
+          mRoleLower === "manager" ||
+          mRoleLower === "hr" ||
+          mRoleLower === "admin";
+
+        if (isManagerOrFnd) {
+          managerData = {
+            id: empId,
+            name: m.full_name || "Manager",
+            full_name: m.full_name || "Manager",
+            email: m.email,
+            role: isFnd ? "founder" : "manager",
+            access,
+            team: m.team || "Team",
+            designation: dbDesignation || m.designation || "Manager",
+            route: isFnd ? "/founder-dashboard" : "/manager-dashboard",
+            bypassProfile: m.bypassProfile || profileExistsRaw
+          };
+        } else {
+          console.debug("rpcManagerLogin returned non-manager user, skipping to next block.");
+        }
+      } catch (e) {
+        console.debug("Not a manager:", e.message);
+      }
+
+      if (managerData) {
+        const sessionPayload = { ...managerData, loginRole: managerData.role };
+        localStorage.setItem("HRMSS_AUTH_SESSION", JSON.stringify(sessionPayload));
+        localStorage.setItem(MANAGER_SESSION_KEY, JSON.stringify(managerData));
+
+        await tryEnsureSupabaseForDocs({
+          role: "manager",
+          identifier: email,
+          password: password,
+          preferredEmail: email,
+        }, "manager");
+
+        const completed = managerData.bypassProfile || isCompleted("manager");
+        // Redirection to sign-in disabled as per user request
+        const targetPath = managerData.role === "founder" ? "/founder-dashboard" : "/manager-dashboard";
+        navigate(targetPath, { replace: true });
+        return;
+      }
+
+      // --- 2. Try HR Login ---
+      try {
+        const session = await rpcVerifyApp({
+          p_role: "hr",
+          p_identifier: email,
+          p_admin_id: null,
+          p_secret: password,
+        });
+
+        const userId = session?.user_id || session?.id || session?.userId || null;
+        const emailPrefix = email.split("@")[0].toUpperCase();
+
+        // Look up employees table by EMAIL (case-insensitive) or by ID prefix (e.g. F0001)
+        const { data: empByEmail } = await supabase
+          .from("employees")
+          .select("employee_id, designation, full_name")
+          .or(`email.ilike.${email},employee_id.eq.${emailPrefix}`)
+          .maybeSingle();
+
+        const hrEmpId = empByEmail?.employee_id || session?.employee_id || userId;
+        const empDesignation = (empByEmail?.designation || session?.designation || "").toLowerCase();
+
+        // Fetch display name for the session
+        const hrNameData = empByEmail || { full_name: session?.full_name || session?.name || "" };
+
+        // Parallelize profile check 
+        const profileExistsRaw = userId ? await appProfileExists(userId, email) : false;
+
+        const dbDesignation = (empDesignation || "HR").trim().toLowerCase();
+
+        const idLower = String(hrEmpId || userId || "").toLowerCase();
+        const mailLower = String(email || "").toLowerCase();
+        const sRoleLower = String(session?.role || "").toLowerCase();
+
+        console.log("[Login] HR/Founder detection:", {
+          hrEmpId, empByEmail, dbDesignation, sRoleLower, idLower, mailLower
+        });
+
+        const isFounder = dbDesignation.includes("founder") ||
+          dbDesignation.includes("boss") ||
+          mailLower.includes("founder") ||
+          mailLower.startsWith("founder") ||
+          idLower === "founder" ||
+          idLower.startsWith("fnd") ||
+          idLower.startsWith("f0") ||
+          sRoleLower === "founder" ||
+          sRoleLower === "boss";
+
+        const isHRorFnd = isFounder ||
+          dbDesignation.includes("hr") ||
+          dbDesignation.includes("admin") ||
+          sRoleLower === "hr" ||
+          sRoleLower === "admin";
+
+        if (!isHRorFnd) {
+          console.debug("rpcVerifyApp(hr) returned non-HR user, falling through.");
+          throw new Error("Not an HR user");
+        }
+
+        const targetPath = isFounder ? "/founder-dashboard" : "/hr-dashboard";
+        const targetRole = isFounder ? "founder" : "hr";
+
+        const sessionPayload = {
+          ...session,
+          role: targetRole,
+          full_name: hrNameData?.full_name || session?.full_name || session?.name || "",
+          name: hrNameData?.full_name || session?.full_name || session?.name || "",
+          loginRole: targetRole,
+          designation: dbDesignation,
+          employee_id: hrEmpId,
+        };
+        localStorage.setItem("HRMSS_AUTH_SESSION", JSON.stringify(sessionPayload));
+
+        await tryEnsureSupabaseForDocs({
+          role: targetRole,
+          identifier: email,
+          password: password,
+          preferredEmail: email,
+        }, targetRole);
+
+        // Redirection to sign-in disabled as per user request
+        localStorage.setItem(COMPLETION_KEY(targetRole), "true");
+        if (isFounder) localStorage.setItem(COMPLETION_KEY("founder"), "true");
+        await new Promise(r => setTimeout(r, 100));
+        navigate(targetPath, { replace: true });
+        return;
+      } catch (e) {
+        console.debug("Not an HR:", e.message);
+      }
+
+      // --- 3. Try EMPLOYEE Login ---
+      try {
+        const session = await rpcVerifyApp({
+          p_role: "employee",
+          p_identifier: email,
+          p_admin_id: null,
+          p_secret: password,
+        });
+
+        const isHariPriya = email.toLowerCase() === "haripriya@vijayshipping.com";
+        const empId = session?.employee_id || session?.id || session?.user_id || null;
+
+        // Fetch display name for the session
+        const { data: nameData } = await supabase
+          .from("employees")
+          .select("full_name")
+          .eq("employee_id", empId)
+          .maybeSingle();
+
+        // Parallelize fetching designation and checking profile
+        const [dbDesignationRaw, completed] = await Promise.all([
+          fetchUserDesignation(empId),
+          employeeProfileCompleted(empId, email)
+        ]);
+
+        // Fetch fresh designation for the session from employees table
+        const userDesignation = (dbDesignationRaw || session?.designation || "").trim().toLowerCase();
+
+        // Aggressive Founder detection: check designation, email, and ID prefix
+        const idLower = String(empId || "").toLowerCase();
+        const mailLower = String(email || "").toLowerCase();
+
+        const isFounder = userDesignation.includes("founder") ||
+          userDesignation.includes("boss") ||
+          mailLower.includes("founder") ||
+          mailLower.startsWith("founder") ||
+          idLower === "founder" ||
+          idLower.startsWith("fnd");
+
+        const isFnd = isFounder;
+        const isMgr = userDesignation.includes("manager") && !isFnd;
+        const isHR = (userDesignation.includes("hr") || userDesignation.includes("admin") || isHariPriya) && !isFnd && !isMgr;
+
+        let targetRole = "employee";
+        let targetPath = "/employee-dashboard";
+
+        if (isFnd) {
+          targetRole = "founder";
+          targetPath = "/founder-dashboard";
+        } else if (isMgr) {
+          targetRole = "manager";
+          targetPath = "/manager-dashboard";
+        } else if (isHR) {
+          targetRole = "hr";
+          targetPath = "/hr-dashboard";
+        }
+
+        // Management roles are considered profile-completed for the dashboard entry
+        const isManagementPath = targetRole === "hr" || targetRole === "admin" || targetRole === "manager" || isFnd;
+        const finalCompleted = completed || isManagementPath;
+
+        const sessionPayload = {
+          ...session,
+          full_name: nameData?.full_name || session?.full_name || session?.name || "",
+          name: nameData?.full_name || session?.full_name || session?.name || "",
+          loginRole: targetRole,
+          role: targetRole,
+          designation: userDesignation
+        };
+        localStorage.setItem("HRMSS_AUTH_SESSION", JSON.stringify(sessionPayload));
+
+        // Mark roles as completed to avoid redirection loops in layouts
+        localStorage.setItem(COMPLETION_KEY("employee"), finalCompleted ? "true" : "false");
+        if (targetRole !== "employee") {
+          localStorage.setItem(COMPLETION_KEY(targetRole), finalCompleted ? "true" : "false");
+        }
+        if (isFnd) {
+          localStorage.setItem(COMPLETION_KEY("founder"), finalCompleted ? "true" : "false");
+        }
+        if (isMgr || isHR) {
+          localStorage.setItem(COMPLETION_KEY("manager"), finalCompleted ? "true" : "false");
+          localStorage.setItem(COMPLETION_KEY("hr"), finalCompleted ? "true" : "false");
+        }
+
+        await new Promise(r => setTimeout(r, 100));
+
+        // Redirection to sign-in disabled as per user request
+        navigate(targetPath, { replace: true });
+        /*
+        if (!finalCompleted) {
+          navigate("/sign-in", {
+            replace: true,
+            state: {
+              role: targetRole,
+              empId: empId || "",
+              redirectTo: targetPath
+            }
+          });
+        } else {
+          navigate(targetPath, { replace: true });
+        }
+        */
+        return;
+      } catch (e) {
+        console.debug("Not an employee:", e.message);
+      }
+
+      throw new Error("Invalid email or password");
+
+    } catch (ex) {
+      const msg = typeof ex?.message === "string" && ex.message.toLowerCase().includes("invalid")
+        ? "Invalid email or password"
+        : ex?.message || "Login failed";
+      setErr(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const rightImageUrl =
+    "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1400&q=60";
+
+  return (
+    <div className="h-screen w-screen flex items-center justify-center relative font-sans overflow-hidden">
+      {/* Dynamic Background Image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-1000"
+        style={{ backgroundImage: `url(background.png)` }}
+      />
+      {/* Dark Overlay for Depth and Contrast */}
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
+
+      {/* Main Glass Container */}
+      <div className="relative z-10 w-full max-w-6xl h-full max-h-[min(750px,95vh)] bg-white/10 rounded-[30px] md:rounded-[40px] border border-white/20 shadow-2xl flex flex-col md:flex-row items-center overflow-hidden p-4 md:p-8 gap-6 md:gap-10">
+
+        {/* LEFT AREA: Title and Cards Section */}
+        <div className="w-full flex flex-col gap-8 items-center justify-center">
+
+          <div className="text-center">
+            <h2 className="text-2xl md:text-3xl font-black text-white leading-tight tracking-tight uppercase drop-shadow-xl">
+              HUMAN RESOURCE <br /> MANAGEMENT SYSTEM
+            </h2>
+          </div>
+
+          <div className="w-full flex flex-col md:flex-row gap-6 md:gap-8 items-center md:items-stretch justify-center">
+            {/* 1. Login Card */}
+            <div className="w-full max-w-[380px] flex flex-col gap-4 items-center">
+              <div className="w-full bg-white rounded-[24px] md:rounded-[32px] shadow-2xl p-6 md:p-8 flex flex-col items-center overflow-y-auto max-h-full">
+                <div className="w-full">
+                  <div className="flex justify-center mb-1">
+                    <div className="p-3 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">
+                      <img src="/VijayShipping_Logo.png" alt="Vijay Shipping" className="h-12 w-auto" />
+                    </div>
+                  </div>
+
+                  {err && (
+                    <div className="mt-3 rounded-xl border border-red-100 bg-red-50 text-red-700 px-3 py-2 text-[11px] md:text-xs flex gap-2">
+                      <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                      <div className="min-w-0">{err}</div>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSubmit} className="mt-6 space-y-6 w-full">
+                    <div className="space-y-4">
+                      <Field
+                        ref={emailRef}
+                        icon={Mail}
+                        type="email"
+                        placeholder="Email Address"
+                        autoComplete="email"
+                        required
+                      />
+                      <Field
+                        ref={passRef}
+                        icon={Lock}
+                        type={showPassword ? "text" : "password"}
+                        placeholder="Password"
+                        autoComplete="current-password"
+                        required
+                        right={
+                          <button
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              setShowPassword(s => !s);
+                              setTimeout(() => passRef.current?.focus(), 0);
+                            }}
+                            className="text-gray-400 hover:text-gray-600"
+                          >
+                            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        }
+                      />
+                    </div>
+
+                    <div className="flex justify-end">
+                      {/* <button type="button" className="text-[10px] md:text-xs text-[#598791] font-semibold hover:underline">Forgot Password?</button> */}
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className={`w-full py-4 rounded-xl text-white font-bold transition-all shadow-lg active:scale-95 ${loading ? "bg-[#8e7091] cursor-not-allowed" : "bg-[#598791] hover:bg-[#75b0bd] hover:shadow-[#598791]/30"}`}
+                    >
+                      {loading ? (
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Signing in...</span>
+                        </div>
+                      ) : "Sign In"}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Attendance Quick Access Card */}
+            <div className="w-full max-w-[380px] md:max-w-[280px] flex flex-col gap-4 items-center">
+              <div className="w-full h-full bg-white/10 backdrop-blur-md rounded-[24px] md:rounded-[32px] border border-white/20 shadow-2xl p-6 md:p-8 flex flex-col items-center justify-center text-center">
+                <div className="mb-6 p-4 bg-white/20 rounded-full floating-animation">
+                  <Clock className="text-white" size={32} />
+                </div>
+                <h3 className="text-white text-xl font-bold mb-2">Quick Attendance</h3>
+                <p className="text-white/80 text-sm mb-8">Mark your daily attendance instantly</p>
+
+                <button
+                  onClick={() => navigate("/quick-attendance")}
+                  className="w-full py-4 rounded-xl bg-white text-[#598791] font-bold transition-all shadow-xl hover:bg-gray-100 active:scale-95 flex items-center justify-center gap-2"
+                >
+                  Attendance
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT: Illustration Content */}
+        <div className="hidden md:flex flex-1 flex-col items-center justify-center text-center p-4 relative overflow-hidden group">
+          {/* Heavily Blurred Background Image */}
+          <div
+            className="absolute inset-x-0 inset-y-0 bg-center bg-cover bg-no-repeat blur-[60px] opacity-40 transition-transform duration-700 group-hover:scale-110"
+            style={{ backgroundImage: `url(hr_login_bg.png)` }}
+          />
+
+          {/* Floating Branding Image in side panel */}
+          <div className="relative z-10 w-full h-full flex items-center justify-center">
+            <div className="w-4/5 h-4/5 rounded-3xl overflow-hidden shadow-2xl border border-white/20 floating-animation">
+              <img
+                src="hr_login_bg.png"
+                alt="HR Branding"
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <style>{`
+        @keyframes float {
+          0% { transform: translateY(0px) rotate(0deg); }
+          50% { transform: translateY(-20px) rotate(1deg); }
+          100% { transform: translateY(0px) rotate(0deg); }
+        }
+        .floating-animation {
+          animation: float 10s ease-in-out infinite;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+
