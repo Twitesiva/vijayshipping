@@ -152,45 +152,45 @@ export default function HrLayout() {
               />
             )}
 
-            <div>
-              <button
-                onClick={() => {
-                  if (!isSidebarOpen) setIsSidebarOpen(true);
-                  setIsAttendanceOpen((v) => !v);
-                }}
-                className={`w-full flex items-center ${!isSidebarOpen ? "justify-center" : "justify-between"} px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 text-gray-700 hover:bg-[#e6ffff] hover:text-[#009999]`}
-              >
-                <div className={`flex items-center ${!isSidebarOpen ? "justify-center" : "gap-3"}`}>
-                  <ClipboardList size={18} className="shrink-0" />
-                  {isSidebarOpen && <span className="truncate">Attendance</span>}
-                </div>
-                {isSidebarOpen && (
-                  isAttendanceOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />
-                )}
-              </button>
+            {pathname.startsWith("/manager-dashboard") ? (
+              <>
+                <SideItem
+                  to="/manager-dashboard/attendance/my-attendance"
+                  icon={ClipboardList}
+                  label="My Attendance"
+                  isCollapsed={!isSidebarOpen}
+                />
+                <SideItem
+                  to="/manager-dashboard/attendance/reports"
+                  icon={ClipboardList}
+                  label="Reports"
+                  isCollapsed={!isSidebarOpen}
+                />
+              </>
+            ) : (
+              <div>
+                <button
+                  onClick={() => {
+                    if (!isSidebarOpen) setIsSidebarOpen(true);
+                    setIsAttendanceOpen((v) => !v);
+                  }}
+                  className={`w-full flex items-center ${!isSidebarOpen ? "justify-center" : "justify-between"} px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 text-gray-700 hover:bg-[#e6ffff] hover:text-[#009999]`}
+                >
+                  <div className={`flex items-center ${!isSidebarOpen ? "justify-center" : "gap-3"}`}>
+                    <ClipboardList size={18} className="shrink-0" />
+                    {isSidebarOpen && <span className="truncate">Attendance</span>}
+                  </div>
+                  {isSidebarOpen && (
+                    isAttendanceOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />
+                  )}
+                </button>
 
-              {isSidebarOpen && isAttendanceOpen && (
-                <div className="pl-11 pr-2 space-y-1 mt-1">
-                  <NavLink
-                    to={
-                      pathname.startsWith("/manager-dashboard") ? "/manager-dashboard/attendance/my-attendance" :
-                        pathname.startsWith("/founder-dashboard") ? "/founder-dashboard/attendance/my-attendance" :
-                          "/hr-dashboard/attendance/my-attendance"
-                    }
-                    className={({ isActive }) =>
-                      `block px-3 py-2 rounded-lg text-xs font-medium transition-all ${isActive
-                        ? "bg-[#f8f1f1] text-[#598791]"
-                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
-                      }`}
-                  >
-                    My Attendance
-                  </NavLink>
-                  {hasFullAccess && (
+                {isSidebarOpen && isAttendanceOpen && (
+                  <div className="pl-11 pr-2 space-y-1 mt-1">
                     <NavLink
                       to={
-                        pathname.startsWith("/manager-dashboard") ? "/manager-dashboard/attendance/reports" :
-                          pathname.startsWith("/founder-dashboard") ? "/founder-dashboard/attendance/reports" :
-                            "/hr-dashboard/attendance/reports"
+                        pathname.startsWith("/founder-dashboard") ? "/founder-dashboard/attendance/my-attendance" :
+                          "/hr-dashboard/attendance/my-attendance"
                       }
                       className={({ isActive }) =>
                         `block px-3 py-2 rounded-lg text-xs font-medium transition-all ${isActive
@@ -198,12 +198,27 @@ export default function HrLayout() {
                           : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                         }`}
                     >
-                      Reports
+                      My Attendance
                     </NavLink>
-                  )}
-                </div>
-              )}
-            </div>
+                    {hasFullAccess && (
+                      <NavLink
+                        to={
+                          pathname.startsWith("/founder-dashboard") ? "/founder-dashboard/attendance/reports" :
+                            "/hr-dashboard/attendance/reports"
+                        }
+                        className={({ isActive }) =>
+                          `block px-3 py-2 rounded-lg text-xs font-medium transition-all ${isActive
+                            ? "bg-[#f8f1f1] text-[#598791]"
+                            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                          }`}
+                      >
+                        Reports
+                      </NavLink>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {hasFullAccess && (
               <SideItem

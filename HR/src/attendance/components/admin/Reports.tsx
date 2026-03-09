@@ -60,6 +60,7 @@ export default function Reports() {
     const theme = useTheme();
     const [reportType] = React.useState<ReportType>('daily');
     const [dailyReportDate, setDailyReportDate] = React.useState('');
+    const [reportDateTo, setReportDateTo] = React.useState('');
     const [reportEmployee, setReportEmployee] = React.useState('');
     const [reportLocation, setReportLocation] = React.useState<ReportLocationFilter>('');
     const [currentReport, setCurrentReport] = React.useState<any>(null);
@@ -90,6 +91,7 @@ export default function Reports() {
     React.useEffect(() => {
         const today = new Date();
         setDailyReportDate(toInputDate(today));
+        setReportDateTo(toInputDate(today));
 
         const loadOptions = async () => {
             try {
@@ -116,6 +118,7 @@ export default function Reports() {
         const now = new Date();
         const today = toInputDate(now);
         setDailyReportDate(today);
+        setReportDateTo(today);
         setReportEmployee('');
         setReportLocation('');
     };
@@ -143,7 +146,7 @@ export default function Reports() {
 
         if (!dailyReportDate) return [] as any[];
         params.append('date_from', dailyReportDate);
-        params.append('date_to', dailyReportDate);
+        params.append('date_to', reportDateTo || dailyReportDate);
 
         if (reportEmployee) params.append('employee_id', reportEmployee);
 
@@ -165,7 +168,7 @@ export default function Reports() {
             records = records.filter((r: any) => !isInsideOfficeLocation(r));
         }
         return records;
-    }, [dailyReportDate, reportEmployee, reportLocation, isInsideOfficeLocation]);
+    }, [dailyReportDate, reportDateTo, reportEmployee, reportLocation, isInsideOfficeLocation]);
 
     const buildReportFromRecords = (records: any[]) => {
         const details = records.map((r) => ({
@@ -215,6 +218,7 @@ export default function Reports() {
     }, [
         generateReport,
         dailyReportDate,
+        reportDateTo,
         reportEmployee,
         reportLocation
     ]);
@@ -259,7 +263,7 @@ export default function Reports() {
                         <Grid item xs={12} md={3}>
                             <TextField
                                 type="date"
-                                label="Day"
+                                label="From Date"
                                 fullWidth
                                 InputLabelProps={{ shrink: true }}
                                 value={dailyReportDate}
@@ -267,6 +271,17 @@ export default function Reports() {
                             />
                         </Grid>
                         <Grid item xs={12} md={3}>
+                            <TextField
+                                type="date"
+                                label="To Date"
+                                fullWidth
+                                InputLabelProps={{ shrink: true }}
+                                value={reportDateTo}
+                                inputProps={{ min: dailyReportDate }}
+                                onChange={(e) => setReportDateTo(e.target.value)}
+                            />
+                        </Grid>
+                        <Grid item xs={12} md={2}>
                             <TextField
                                 select
                                 label="Employee"
@@ -282,7 +297,7 @@ export default function Reports() {
                                 ))}
                             </TextField>
                         </Grid>
-                        <Grid item xs={12} md={3}>
+                        <Grid item xs={12} md={2}>
                             <TextField
                                 select
                                 label="Location"
@@ -295,7 +310,7 @@ export default function Reports() {
                                 <MenuItem value="outside_office">Outside Office</MenuItem>
                             </TextField>
                         </Grid>
-                        <Grid item xs={12} md={3}>
+                        <Grid item xs={12} md={2}>
                             <Button
                                 variant="outlined"
                                 fullWidth
