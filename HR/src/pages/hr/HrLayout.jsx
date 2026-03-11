@@ -28,6 +28,7 @@ export default function HrLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   const [isAttendanceOpen, setIsAttendanceOpen] = useState(pathname.startsWith("/hr-dashboard/attendance") || pathname.startsWith("/founder-dashboard/attendance"));
   const [designation, setDesignation] = useState("");
@@ -96,6 +97,16 @@ export default function HrLayout() {
     setIsAttendanceOpen(pathname.startsWith("/hr-dashboard/attendance") || pathname.startsWith("/founder-dashboard/attendance"));
   }, [pathname]);
 
+  // Close mobile drawer on route change
+  useEffect(() => {
+    setIsMobileOpen(false);
+  }, [pathname]);
+
+  // Body scroll lock when mobile drawer open
+  useEffect(() => {
+    document.body.style.overflow = isMobileOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [isMobileOpen]);
 
   const handleLogout = () => {
     localStorage.removeItem("HRMSS_AUTH_SESSION");
@@ -104,22 +115,29 @@ export default function HrLayout() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
+      {/* Mobile backdrop */}
+      {isMobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={() => setIsMobileOpen(false)}
+        />
+      )}
       {/* SIDEBAR */}
       <aside
-
-        className={`bg-white border-r sticky top-0 h-screen transition-all duration-300 ease-in-out ${isSidebarOpen ? "w-[280px]" : "w-[72px]"
-          }`}
+        className={`bg-white border-r h-screen fixed md:sticky inset-y-0 left-0 top-0 z-50 transition-all duration-300 ease-in-out
+          ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+          w-[280px] ${isSidebarOpen ? 'md:w-[280px]' : 'md:w-[72px]'}`}
       >
         <div className="h-full flex flex-col overflow-hidden">
           {/* Brand */}
           <div className={`p-5 border-b flex items-center gap-3 ${isSidebarOpen ? 'justify-between' : 'justify-center'}`}>
             {isSidebarOpen ? (
               <div className="flex flex-col items-start min-w-0">
-                <img src="/VijayShipping_Logo.png" alt="Vijay Shipping" className="h-8 w-auto max-w-full object-contain mb-1" />
-                <span className="text-[10px] font-black text-gray-400 tracking-[0.2em] uppercase opacity-60">HRMS Portal</span>
+                <img src="/VijayShipping_Logo.png" alt="Vijay Shipping" className="h-16 w-auto max-w-full object-contain mb-1" />
+<span className="text-[10px] font-black text-gray-400 tracking-[0.2em] uppercase opacity-60">Attendance Portal</span>
               </div>
             ) : (
-              <div className="w-8 h-8 rounded-lg bg-white border border-gray-100 flex items-center justify-center p-1.5 shadow-sm overflow-hidden">
+              <div className="w-12 h-12 rounded-lg bg-white border border-gray-100 flex items-center justify-center p-1.5 shadow-sm overflow-hidden">
                 <img src="/VijayShipping_Logo.png" alt="V" className="w-full h-auto object-contain" />
               </div>
             )}
@@ -127,6 +145,7 @@ export default function HrLayout() {
 
           {/* Nav */}
           <nav className="p-3 space-y-1.5 flex-1 overflow-y-auto overflow-x-hidden">
+            {/* 1. Dashboard */}
             <SideItem
               to={
                 pathname.startsWith("/manager-dashboard") ? "/manager-dashboard" :
@@ -139,6 +158,7 @@ export default function HrLayout() {
               isCollapsed={!isSidebarOpen}
             />
 
+            {/* 2. Employees */}
             {hasFullAccess && (
               <SideItem
                 to={
@@ -152,55 +172,79 @@ export default function HrLayout() {
               />
             )}
 
-            {pathname.startsWith("/manager-dashboard") ? (
-              <>
-                <SideItem
-                  to="/manager-dashboard/attendance/my-attendance"
-                  icon={ClipboardList}
-                  label="My Attendance"
-                  isCollapsed={!isSidebarOpen}
-                />
-                <SideItem
-                  to="/manager-dashboard/attendance/reports"
-                  icon={ClipboardList}
-                  label="Reports"
-                  isCollapsed={!isSidebarOpen}
-                />
-              </>
-            ) : (
-              <div>
-                <button
-                  onClick={() => {
-                    if (!isSidebarOpen) setIsSidebarOpen(true);
-                    setIsAttendanceOpen((v) => !v);
-                  }}
-                  className={`w-full flex items-center ${!isSidebarOpen ? "justify-center" : "justify-between"} px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 text-gray-700 hover:bg-[#e6ffff] hover:text-[#009999]`}
-                >
-                  <div className={`flex items-center ${!isSidebarOpen ? "justify-center" : "gap-3"}`}>
-                    <ClipboardList size={18} className="shrink-0" />
-                    {isSidebarOpen && <span className="truncate">Attendance</span>}
-                  </div>
-                  {isSidebarOpen && (
-                    isAttendanceOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />
-                  )}
-                </button>
+            {/* 3. Face Enroll (for managers, moves up) */}
+            {pathname.startsWith("/manager-dashboard") && (
+              <SideItem
+                to="/manager-dashboard/face-enroll"
+                icon={Users}
+                label="Face Enroll"
+                isCollapsed={!isSidebarOpen}
+              />
+            )}
 
-                {isSidebarOpen && isAttendanceOpen && (
-                  <div className="pl-11 pr-2 space-y-1 mt-1">
-                    <NavLink
-                      to={
+            {/* 4. Reports (for managers, moves up) */}
+            {pathname.startsWith("/manager-dashboard") && (
+              <SideItem
+                to="/manager-dashboard/attendance/reports"
+                icon={ClipboardList}
+                label="Reports"
+                isCollapsed={!isSidebarOpen}
+              />
+            )}
+
+            {/* 5. Attendance Dropdown */}
+            <div>
+              <button
+                onClick={() => {
+                  if (!isSidebarOpen) setIsSidebarOpen(true);
+                  setIsAttendanceOpen((v) => !v);
+                }}
+                className={`w-full flex items-center ${!isSidebarOpen ? "justify-center" : "justify-between"} px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 text-gray-700 hover:bg-[#e6ffff] hover:text-[#009999] ${(pathname.includes("/attendance/")) ? 'bg-[#e6ffff] text-[#009999]' : ''}`}
+              >
+                <div className={`flex items-center ${!isSidebarOpen ? "justify-center" : "gap-3"}`}>
+                  <ClipboardList size={18} className="shrink-0" />
+                  {isSidebarOpen && <span className="truncate">Attendance</span>}
+                </div>
+                {isSidebarOpen && (
+                  isAttendanceOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />
+                )}
+              </button>
+
+              {isSidebarOpen && isAttendanceOpen && (
+                <div className="pl-11 pr-2 space-y-1 mt-1">
+                  {/* Common: My Attendance */}
+                  <NavLink
+                    to={
+                      pathname.startsWith("/manager-dashboard") ? "/manager-dashboard/attendance/my-attendance" :
                         pathname.startsWith("/founder-dashboard") ? "/founder-dashboard/attendance/my-attendance" :
                           "/hr-dashboard/attendance/my-attendance"
-                      }
+                    }
+                    className={({ isActive }) =>
+                      `block px-3 py-2 rounded-lg text-xs font-medium transition-all ${isActive
+                        ? "bg-[#f8f1f1] text-[#598791]"
+                        : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                      }`}
+                  >
+                    My Attendance
+                  </NavLink>
+                  
+                  {/* Manager/Employee: My Dashboard */}
+                  {(pathname.startsWith("/manager-dashboard")) && (
+                    <NavLink
+                      to="/manager-dashboard/attendance/dashboard"
                       className={({ isActive }) =>
                         `block px-3 py-2 rounded-lg text-xs font-medium transition-all ${isActive
                           ? "bg-[#f8f1f1] text-[#598791]"
                           : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                         }`}
                     >
-                      My Attendance
+                      My Dashboard
                     </NavLink>
-                    {hasFullAccess && (
+                  )}
+
+                   {/* HR/Founder/Admin extra: Reports */}
+                  {(pathname.startsWith("/hr-dashboard") || pathname.startsWith("/founder-dashboard")) && hasFullAccess && (
+                    <>
                       <NavLink
                         to={
                           pathname.startsWith("/founder-dashboard") ? "/founder-dashboard/attendance/reports" :
@@ -214,18 +258,31 @@ export default function HrLayout() {
                       >
                         Reports
                       </NavLink>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+                      <NavLink
+                        to={
+                          pathname.startsWith("/founder-dashboard") ? "/founder-dashboard/attendance/employees" :
+                            "/hr-dashboard/attendance/employees"
+                        }
+                        className={({ isActive }) =>
+                          `block px-3 py-2 rounded-lg text-xs font-medium transition-all ${isActive
+                            ? "bg-[#f8f1f1] text-[#598791]"
+                            : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                          }`}
+                      >
+                        Attendance Employees
+                      </NavLink>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
 
-            {hasFullAccess && (
+            {/* Other items for HR/Founder if any (Face Enroll was here before) */}
+            {!pathname.startsWith("/manager-dashboard") && hasFullAccess && (
               <SideItem
                 to={
-                  pathname.startsWith("/manager-dashboard") ? "/manager-dashboard/face-enroll" :
-                    pathname.startsWith("/founder-dashboard") ? "/founder-dashboard/face-enroll" :
-                      "/hr-dashboard/face-enroll"
+                  pathname.startsWith("/founder-dashboard") ? "/founder-dashboard/face-enroll" :
+                    "/hr-dashboard/face-enroll"
                 }
                 icon={Users}
                 label="Face Enroll"
@@ -257,10 +314,16 @@ export default function HrLayout() {
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => setIsSidebarOpen((open) => !open)}
+                onClick={() => {
+                  if (window.innerWidth < 768) {
+                    setIsMobileOpen(v => !v);
+                  } else {
+                    setIsSidebarOpen(v => !v);
+                  }
+                }}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50"
-                aria-label={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
-                title={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+                aria-label="Toggle sidebar"
+                title="Toggle sidebar"
               >
                 <Menu size={18} />
               </button>

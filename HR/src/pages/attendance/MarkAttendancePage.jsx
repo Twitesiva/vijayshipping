@@ -11,7 +11,10 @@ import {
     CheckCircle,
     AlertCircle,
     Search,
-    Globe
+    Globe,
+    Shield,
+    ShieldAlert,
+    ShieldCheck
 } from "lucide-react";
 import API_BASE_URL from "../../config";
 
@@ -47,6 +50,61 @@ export default function MarkAttendancePage() {
     const detectionIntervalRef = useRef(null);
 
     const [locationWatchId, setLocationWatchId] = useState(null);
+
+    // Geofence states
+    const [isWithinGeofence, setIsWithinGeofence] = useState(false);
+    const [geofenceDistance, setGeofenceDistance] = useState(null);
+    const [geofenceLoading, setGeofenceLoading] = useState(false);
+    const [geofenceError, setGeofenceError] = useState("");
+
+    // Check geofence when coordinates change
+    useEffect(() => {
+        if (coordinates && coordinates.latitude && coordinates.longitude) {
+            checkGeofence();
+        }
+    }, [coordinates]);
+
+    const checkGeofence = async () => {
+        if (!coordinates || !coordinates.latitude || !coordinates.longitude) return;
+        
+        setGeofenceLoading(true);
+        setGeofenceError("");
+        
+        try {
+            const url = `${API_BASE_URL}/api/v1/attendance/check-geofence?lat=${coordinates.latitude}&lng=${coordinates.longitude}`;
+            console.log("[Geofence] Checking location:", coordinates.latitude, coordinates.longitude);
+            console.log("[Geofence] Calling API:", url);
+            
+            const response = await fetch(url);
+            const result = await response.json();
+            
+            console.log("[Geofence] API Response:", result);
+            
+            if (result.success) {
+                setIsWithinGeofence(result.is_within_geofence);
+                setGeofenceDistance(result.distance_meters);
+                console.log("[Geofence] Result - Inside:", result.is_within_geofence, "Distance:", result.distance_meters, "m");
+            } else {
+                setGeofenceError(result.message || "Failed to check location");
+                console.error("[Geofence] API Error:", result.message);
+            }
+        } catch (err) {
+            console.error("Geofence check error:", err);
+            setGeofenceError("Unable to verify location");
+        } finally {
+            setGeofenceLoading(false);
+        }
+    };
+
+    const handleWorkModeChange = (mode) => {
+        // If trying to switch to Office but outside geofence, show warning
+        if (mode === "Office" && !isWithinGeofence && geofenceDistance !== null) {
+            setError(`You are outside office zone (${Math.round(geofenceDistance)}m away). Please use Field Work mode.`);
+            return;
+        }
+        setWorkMode(mode);
+        setError(""); // Clear any geofence-related error
+    };
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -179,6 +237,15 @@ export default function MarkAttendancePage() {
             setCameraActive(true);
             setFaceStatus("Ready - Click Login/Logout");
             isStartingRef.current = false;
+            
+            // Auto-detect face immediately after camera starts
+            // This will also check if user is already logged in
+            setTimeout(() => {
+                if (isMountedRef.current && !isDetecting) {
+                    performFaceDetection();
+                }
+            }, 500);
+            
             // Live scanning loop removed - we now verify only on button click as requested
         } catch (err) {
             console.error("Camera fail:", err);
@@ -267,6 +334,12 @@ export default function MarkAttendancePage() {
     };
 
     const handleMarkAttendance = async (action) => {
+        // Block attendance if outside office zone and in Office mode
+        if (!isWithinGeofence && workMode === "Office" && geofenceDistance !== null) {
+            setError(`You are outside office zone (${Math.round(geofenceDistance)}m away). Please switch to Field Work mode to mark attendance.`);
+            return;
+        }
+
         if (!coordinates || loading) return;
         setLoading(true);
         setError("");
@@ -361,9 +434,9 @@ export default function MarkAttendancePage() {
             </button>
 
             {/* Attendance Card Container */}
-            <div className="relative z-10 w-full max-w-2xl animate-in fade-in slide-in-from-bottom-5 duration-700">
+            <div className="relative z-10 w-full max-w-2xl px-3 sm:px-0 animate-in fade-in slide-in-from-bottom-5 duration-700">
                 <div className="bg-white rounded-[32px] shadow-xl border overflow-hidden">
-                    <div className="p-8 sm:p-10">
+                    <div className="p-5 sm:p-10">
                         {/* Title Section */}
                         <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                             <div>
@@ -411,14 +484,15 @@ export default function MarkAttendancePage() {
                         {/* Work Mode Selector */}
                         <div className="mb-8 p-1 bg-gray-100 rounded-2xl flex items-center shadow-inner">
                             <button
-                                onClick={() => setWorkMode("Office")}
-                                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-xs tracking-wider transition-all ${workMode === "Office" ? "bg-white text-indigo-600 shadow-md scale-[1.02]" : "text-gray-500 hover:text-gray-700"}`}
+                                onClick={() => handleWorkModeChange("Office")}
+                                disabled={!isWithinGeofence && geofenceDistance !== null && workMode !== "Office"}
+                                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-xs tracking-wider transition-all ${workMode === "Office" ? "bg-white text-indigo-600 shadow-md scale-[1.02]" : "text-gray-500 hover:text-gray-700"} ${!isWithinGeofence && geofenceDistance !== null && workMode !== "Office" ? "opacity-50 cursor-not-allowed" : ""}`}
                             >
                                 <CheckCircle size={16} className={workMode === "Office" ? "opacity-100" : "opacity-0"} />
                                 IN OFFICE
                             </button>
                             <button
-                                onClick={() => setWorkMode("Field")}
+                                onClick={() => handleWorkModeChange("Field")}
                                 className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-xs tracking-wider transition-all ${workMode === "Field" ? "bg-white text-emerald-600 shadow-md scale-[1.02]" : "text-gray-500 hover:text-gray-700"}`}
                             >
                                 <Globe size={16} className={workMode === "Field" ? "opacity-100" : "opacity-0"} />
@@ -426,30 +500,69 @@ export default function MarkAttendancePage() {
                             </button>
                         </div>
 
+                        {/* Geofence Status Indicator */}
+                        {geofenceDistance !== null && (
+                            <div className={`mb-6 p-4 rounded-2xl flex items-center gap-3 ${
+                                isWithinGeofence 
+                                    ? "bg-green-50 border border-green-200" 
+                                    : "bg-amber-50 border border-amber-200"
+                            }`}>
+                                {isWithinGeofence ? (
+                                    <ShieldCheck size={24} className="text-green-600" />
+                                ) : (
+                                    <ShieldAlert size={24} className="text-amber-600" />
+                                )}
+                                <div className="flex-1">
+                                    <span className={`block text-sm font-bold ${isWithinGeofence ? "text-green-700" : "text-amber-700"}`}>
+                                        {isWithinGeofence 
+                                            ? "You are within office zone" 
+                                            : `Outside office zone (${Math.round(geofenceDistance)}m away)`
+                                        }
+                                    </span>
+                                    <span className="block text-xs text-gray-500 mt-0.5">
+                                        {isWithinGeofence 
+                                            ? "Office attendance mode available" 
+                                            : "Please use Field Work mode to mark attendance"
+                                        }
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Operations Row */}
                         <div className="flex flex-wrap gap-4 mb-10">
                             <button
-                                onClick={startCamera}
-                                disabled={cameraActive}
-                                className={`px-8 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all border-2 ${cameraActive ? "bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed" : "bg-white text-gray-900 border-gray-900 hover:bg-gray-900 hover:text-white active:scale-95 shadow-lg"}`}
+                                onClick={() => {
+                                    if (!cameraActive) {
+                                        startCamera();
+                                    } else {
+                                        // If camera is already active, trigger face detection
+                                        performFaceDetection();
+                                    }
+                                }}
+                                disabled={loading}
+                                className={`px-8 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all border-2 ${loading ? "bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed" : cameraActive ? "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 active:scale-95 shadow-lg" : "bg-white text-gray-900 border-gray-900 hover:bg-gray-900 hover:text-white active:scale-95 shadow-lg"}`}
                             >
-                                START CAMERA
+                                {loading ? <RotateCw className="animate-spin mr-2 inline" size={16} /> : null}
+                                {!cameraActive ? "START CAMERA" : "VERIFY FACE"}
                             </button>
                             <button
                                 onClick={() => handleMarkAttendance('entry')}
-                                disabled={!cameraActive || loading}
-                                className={`flex-1 px-10 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-xl active:scale-95 ${(!cameraActive || loading) ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none" : "bg-green-600 text-white hover:bg-green-700 hover:-translate-y-0.5"}`}
+                                disabled={!cameraActive || loading || isLoggedIn}
+                                title={isLoggedIn ? "You are already logged in. Logout to mark login again." : "Mark your arrival"}
+                                className={`flex-1 px-10 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-xl active:scale-95 ${(!cameraActive || loading || isLoggedIn) ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none" : "bg-green-600 text-white hover:bg-green-700 hover:-translate-y-0.5"}`}
                             >
                                 {loading && <RotateCw className="animate-spin mr-2 inline" size={16} />}
-                                LOGIN
+                                {isLoggedIn ? "LOGGED IN" : "LOGIN"}
                             </button>
                             <button
                                 onClick={() => handleMarkAttendance('exit')}
-                                disabled={!cameraActive || loading}
-                                className={`flex-1 px-10 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-xl active:scale-95 ${(!cameraActive || loading) ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none" : "bg-red-600 text-white hover:bg-red-700 hover:-translate-y-0.5"}`}
+                                disabled={!cameraActive || loading || !isLoggedIn}
+                                title={!isLoggedIn ? "You must login first before logging out." : "Mark your departure"}
+                                className={`flex-1 px-10 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-xl active:scale-95 ${(!cameraActive || loading || !isLoggedIn) ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none" : "bg-red-600 text-white hover:bg-red-700 hover:-translate-y-0.5"}`}
                             >
                                 {loading && <RotateCw className="animate-spin mr-2 inline" size={16} />}
-                                LOGOUT
+                                {!isLoggedIn ? "NOT LOGGED IN" : "LOGOUT"}
                             </button>
                         </div>
 

@@ -17,7 +17,7 @@ const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
 const AUTH_KEY = "HRMSS_AUTH_SESSION";
 const COMPLETION_KEY = "hrmss.signin.completed.admin";
 
-const Sidebar = ({ isOpen = true }) => {
+const Sidebar = ({ isOpen = true, isMobileOpen = false }) => {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const [isAttendanceOpen, setIsAttendanceOpen] = useState(pathname.startsWith("/dashboard/attendance"));
@@ -42,17 +42,18 @@ const Sidebar = ({ isOpen = true }) => {
 
   return (
     <aside
-      className={`bg-white border-r shadow-sm flex flex-col h-screen sticky top-0 transition-all duration-300 ${isOpen ? "w-64" : "w-20"
-        }`}
+      className={`bg-white border-r shadow-sm flex flex-col h-screen fixed md:sticky inset-y-0 left-0 top-0 z-50 transition-all duration-300
+        ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        ${isOpen ? 'w-64 md:w-64' : 'w-64 md:w-20'}`}
     >
       <div
         className={`p-5 border-b flex items-center h-[70px] ${isOpen ? "justify-start" : "justify-center"
           }`}
       >
         {isOpen ? (
-          <img src="/VijayShipping_Logo.png" alt="VijayShipping Logo" className="h-10 w-auto object-contain" />
+          <img src="/VijayShipping_Logo.png" alt="VijayShipping Logo" className="h-16 w-auto object-contain" />
         ) : (
-          <div className="w-10 h-10 rounded-xl bg-white border border-gray-100 flex items-center justify-center p-1.5 shadow-sm">
+          <div className="w-12 h-12 rounded-xl bg-white border border-gray-100 flex items-center justify-center p-1.5 shadow-sm">
             <img src="/VijayShipping_Logo.png" alt="V" className="w-full h-auto object-contain" />
           </div>
         )}

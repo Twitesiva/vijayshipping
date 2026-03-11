@@ -15,6 +15,7 @@ import {
     Table,
     TableBody,
     TableCell,
+    TableContainer,
     TableHead,
     TableRow
 } from '@mui/material';
@@ -26,7 +27,7 @@ import {
 } from '@mui/icons-material';
 import { API_BASE } from '../../lib/api';
 import { clearToken, clearUser, getToken } from '../../lib/storage';
-import { formatMinutesToHMM } from '../../lib/format';
+import { formatMinutesToHMM, formatDuration } from '../../lib/format';
 import { AdminDashboardSkeleton } from '../../components/common/Skeletons';
 
 export default function Dashboard() {
@@ -260,7 +261,8 @@ export default function Dashboard() {
                                         Close
                                     </Button>
                                 </Stack>
-                                <Table sx={{ border: '1px solid', borderColor: 'divider', borderRadius: '12px', overflow: 'hidden' }}>
+                                <TableContainer sx={{ overflowX: 'auto', borderRadius: '12px', border: '1px solid', borderColor: 'divider' }}>
+                                <Table>
                                     <TableHead>
                                         <TableRow sx={{ bgcolor: 'action.hover' }}>
                                             <TableCell>Employee</TableCell>
@@ -274,7 +276,7 @@ export default function Dashboard() {
                                             <TableRow key={`${row.employee_id || 'emp'}-${idx}`}>
                                                 <TableCell>{row.full_name || row.employee_id || '--'}</TableCell>
                                                 <TableCell>{row.attendance_status || '--'}</TableCell>
-                                                <TableCell>{row.formatted_duration || `${Number(row.total_hours || 0).toFixed(2)} hrs`}</TableCell>
+                                                <TableCell>{row.formatted_duration || formatDuration(row.total_hours || 0)}</TableCell>
                                                 <TableCell>
                                                     {row.session_types || (row.is_field_work ? 'Field' : 'Office')}
                                                 </TableCell>
@@ -290,6 +292,7 @@ export default function Dashboard() {
                                         )}
                                     </TableBody>
                                 </Table>
+                                </TableContainer>
                             </CardContent>
                         </Card>
                     </Grid>

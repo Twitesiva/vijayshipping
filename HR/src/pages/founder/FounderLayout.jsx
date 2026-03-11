@@ -24,6 +24,7 @@ export default function FounderLayout() {
     const navigate = useNavigate();
     const { pathname } = useLocation();
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [isMobileOpen, setIsMobileOpen] = useState(false);
     const [designation, setDesignation] = useState("");
     const [loginRole, setLoginRole] = useState("");
 
@@ -60,6 +61,17 @@ export default function FounderLayout() {
         }
     }, [normalizedDesignation, loginRole, navigate]);
 
+    // Close mobile drawer on route change
+    useEffect(() => {
+        setIsMobileOpen(false);
+    }, [pathname]);
+
+    // Body scroll lock when mobile drawer open
+    useEffect(() => {
+        document.body.style.overflow = isMobileOpen ? 'hidden' : '';
+        return () => { document.body.style.overflow = ''; };
+    }, [isMobileOpen]);
+
     const handleLogout = () => {
         try {
             sessionStorage.removeItem(DOCS_AUTH_KEY);
@@ -70,20 +82,29 @@ export default function FounderLayout() {
 
     return (
         <div className="min-h-screen bg-gray-50 flex">
+            {/* Mobile backdrop */}
+            {isMobileOpen && (
+                <div
+                    className="fixed inset-0 z-40 bg-black/50 md:hidden"
+                    onClick={() => setIsMobileOpen(false)}
+                />
+            )}
             {/* SIDEBAR */}
             <aside
-                className={`bg-white border-r sticky top-0 h-screen transition-all duration-300 ease-in-out ${isSidebarOpen ? "w-[280px]" : "w-[72px]"}`}
+                className={`bg-white border-r h-screen fixed md:sticky inset-y-0 left-0 top-0 z-50 transition-all duration-300 ease-in-out
+                    ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+                    w-[280px] ${isSidebarOpen ? 'md:w-[280px]' : 'md:w-[72px]'}`}
             >
                 <div className="h-full flex flex-col overflow-hidden">
                     {/* Brand */}
                     <div className={`p-5 border-b flex items-center gap-3 ${isSidebarOpen ? 'justify-between' : 'justify-center'}`}>
                         {isSidebarOpen ? (
                             <div className="flex flex-col items-start min-w-0">
-                                <img src="/VijayShipping_Logo.png" alt="Vijay Shipping" className="h-8 w-auto max-w-full object-contain mb-1" />
+                                <img src="/VijayShipping_Logo.png" alt="Vijay Shipping" className="h-16 w-auto max-w-full object-contain mb-1" />
                                 <span className="text-[10px] font-black text-gray-400 tracking-[0.2em] uppercase opacity-60">Founder Portal</span>
                             </div>
                         ) : (
-                            <div className="w-8 h-8 rounded-lg bg-white border border-gray-100 flex items-center justify-center p-1.5 shadow-sm overflow-hidden">
+                            <div className="w-12 h-12 rounded-lg bg-white border border-gray-100 flex items-center justify-center p-1.5 shadow-sm overflow-hidden">
                                 <img src="/VijayShipping_Logo.png" alt="V" className="w-full h-auto object-contain" />
                             </div>
                         )}
@@ -128,7 +149,13 @@ export default function FounderLayout() {
                         <div className="flex items-center gap-3">
                             <button
                                 type="button"
-                                onClick={() => setIsSidebarOpen((open) => !open)}
+                                onClick={() => {
+                                    if (window.innerWidth < 768) {
+                                        setIsMobileOpen(v => !v);
+                                    } else {
+                                        setIsSidebarOpen(v => !v);
+                                    }
+                                }}
                                 className="inline-flex h-10 w-10 items-center justify-center rounded-xl border bg-white text-gray-700 shadow-sm hover:bg-gray-50"
                             >
                                 <Menu size={18} />

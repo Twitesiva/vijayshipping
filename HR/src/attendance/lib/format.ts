@@ -65,10 +65,25 @@ export const formatTime = (timeStr?: string | Date) => {
 
 /**
  * Formats duration from decimal hours to a human-readable string.
+ * If < 1 hour: shows "X min"
+ * If >= 1 hour: shows "X hr Y min"
  */
 export const formatDuration = (totalHours?: number) => {
-    if (totalHours === undefined || isNaN(totalHours)) return '-';
-    return `${totalHours.toFixed(2)} hrs`;
+    if (totalHours === undefined || isNaN(totalHours) || totalHours <= 0) return '--';
+    
+    const hrs = Math.floor(totalHours);
+    const mins = Math.round((totalHours - hrs) * 60);
+    
+    if (hrs === 0) {
+        // Less than 1 hour - show just minutes
+        return `${mins} min`;
+    } else if (mins === 0) {
+        // Exact hours with no minutes
+        return `${hrs} hr`;
+    } else {
+        // Hours and minutes
+        return `${hrs} hr ${mins} min`;
+    }
 };
 
 /**

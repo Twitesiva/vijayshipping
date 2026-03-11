@@ -17,8 +17,10 @@ import {
   TableContainer,
   TableRow,
   Typography,
+  TextField,
   useMediaQuery,
-  useTheme
+  useTheme,
+  IconButton
 } from '@mui/material';
 import { formatDate, formatTime } from '../../lib/format';
 
@@ -30,6 +32,7 @@ export type HistoryRecord = {
   formatted_duration?: string;
   total_hours?: number;
   status?: string;
+  attendance_type?: string;
   is_field_work?: boolean;
   display_date?: string;
   date?: string;
@@ -42,6 +45,8 @@ type HistoryTableProps = {
   formatDurationFromTimes: (entry?: string, exit?: string) => string;
   enablePagination?: boolean;
   rowsPerPage?: number;
+  showLocation?: boolean;
+  onViewDetails?: (record: HistoryRecord) => void;
 };
 
 export default function HistoryTable({
@@ -50,20 +55,22 @@ export default function HistoryTable({
   formatDurationFromHours,
   formatDurationFromTimes,
   enablePagination = false,
-  rowsPerPage = 10
+  rowsPerPage = 6,
+  showLocation = false,
+  onViewDetails
 }: HistoryTableProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [page, setPage] = React.useState(1);
 
-  React.useEffect(() => {
-    setPage(1);
-  }, [records, enablePagination, rowsPerPage]);
-
   const totalPages = enablePagination ? Math.max(1, Math.ceil(records.length / rowsPerPage)) : 1;
   const visibleRecords = enablePagination
     ? records.slice((page - 1) * rowsPerPage, page * rowsPerPage)
     : records;
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [records, enablePagination, rowsPerPage]);
 
   React.useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -80,7 +87,7 @@ export default function HistoryTable({
       overflow: 'hidden'
     }}>
       <CardContent sx={{ p: { xs: 2.5, sm: 3.5 } }}>
-        <Typography variant="h5" sx={{ mb: 3, fontWeight: 900, color: '#1e293b', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <Typography variant="h5" sx={{ mb: 2, fontWeight: 700, color: '#1e293b', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Box component="span" sx={{ bgcolor: '#f1f5f9', p: 1, borderRadius: '12px', display: 'flex' }}>📋</Box>
           Recent Attendance
         </Typography>
@@ -97,7 +104,7 @@ export default function HistoryTable({
           </Box>
         ) : isMobile ? (
           <Stack spacing={2}>
-            {visibleRecords.map((record, idx) => {
+            {visibleRecords.map((record: any, idx: number) => {
               const rawStatus = String(record.status || 'active').toLowerCase();
               const isAbsent = rawStatus === 'absent';
               const isLoggedIn = rawStatus === 'active';
@@ -114,7 +121,7 @@ export default function HistoryTable({
                     ? formatDurationFromHours(record.total_hours)
                     : '-')
               );
-              const workType = isAbsent ? '--' : (record.is_field_work ? 'Field' : 'Office');
+              const workType = isAbsent ? '--' : (record.attendance_type || (record.is_field_work ? 'Field' : 'Office'));
 
               let statusLabel = 'Completed';
               if (isLoggedIn) statusLabel = 'Active';
@@ -138,14 +145,21 @@ export default function HistoryTable({
                   }}
                 >
                   <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 1.5 }}>
-                    <Box>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#1e293b' }}>{entryDate}</Typography>
-                      <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>
-                        Login: {entryTime}
-                      </Typography>
-                      <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>
-                        Logout: {exitTime}
-                      </Typography>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Box>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 800, color: '#1e293b' }}>{entryDate}</Typography>
+                        <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>
+                          Login: {entryTime}
+                        </Typography>
+                        <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>
+                          Logout: {exitTime}
+                        </Typography>
+                      </Box>
+                      {onViewDetails && !isAbsent && (
+                        <IconButton size="small" onClick={() => onViewDetails(record)} sx={{ color: '#598791' }}>
+                          <Box sx={{ fontSize: '1.2rem' }}>👁️</Box>
+                        </IconButton>
+                      )}
                     </Box>
                     <Chip
                       size="small"
@@ -162,12 +176,22 @@ export default function HistoryTable({
                   <Stack spacing={1}>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                       <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Work Type</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 700, color: record.is_field_work ? '#7c3aed' : '#598791' }}>{workType}</Typography>
+                      <Typography 
+                        variant="body2" 
+                        sx={{ 
+                          fontWeight: 700, 
+                          color: (workType as string) === 'Hybrid' ? '#ec4899' : (record.is_field_work ? '#7c3aed' : '#598791') 
+                        }}
+                      >
+                        {workType}
+                      </Typography>
                     </Box>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Location</Typography>
-                      <Typography variant="body2" sx={{ fontWeight: 700, color: '#1e293b' }}>{location}</Typography>
-                    </Box>
+                    {showLocation && (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Location</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#0ea5e9', fontSize: '0.7rem' }}>{location}</Typography>
+                      </Box>
+                    )}
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                       <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Total Time</Typography>
                       <Typography variant="body2" sx={{ fontWeight: 800, color: '#598791' }}>{hours}</Typography>
@@ -178,21 +202,22 @@ export default function HistoryTable({
             })}
           </Stack>
         ) : (
-          <TableContainer sx={{ borderRadius: '16px', border: '1px solid #e2e8f0', overflow: 'hidden' }}>
+          <TableContainer sx={{ borderRadius: '16px', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
             <Table>
               <TableHead>
                 <TableRow sx={{ bgcolor: '#f8fafc' }}>
-                  <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem', py: 2.5 }}>Date</TableCell>
+                <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem', py: 2.5 }}>Date</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Login</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Logout</TableCell>
+                  {showLocation && <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Location</TableCell>}
                   <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Type</TableCell>
-                  <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Location</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Duration</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Status</TableCell>
+                  {onViewDetails && <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem', textAlign: 'center' }}>Details</TableCell>}
                 </TableRow>
               </TableHead>
               <TableBody>
-                {visibleRecords.map((record, idx) => {
+                {visibleRecords.map((record: any, idx: number) => {
                   const rawStatus = String(record.status || 'active').toLowerCase();
                   const isAbsent = rawStatus === 'absent';
                   const isLoggedIn = rawStatus === 'active';
@@ -209,7 +234,7 @@ export default function HistoryTable({
                         ? formatDurationFromHours(record.total_hours)
                         : '-')
                   );
-                  const workType = isAbsent ? '--' : (record.is_field_work ? 'Field' : 'Office');
+                  const workType = isAbsent ? '--' : (record.attendance_type || (record.is_field_work ? 'Field' : 'Office'));
 
                   let statusLabel = 'Completed';
                   if (isLoggedIn) statusLabel = 'Active';
@@ -226,6 +251,7 @@ export default function HistoryTable({
                       <TableCell sx={{ fontWeight: 700, color: '#1e293b' }}>{entryDate}</TableCell>
                       <TableCell sx={{ color: '#475569', fontWeight: 600 }}>{entryTime}</TableCell>
                       <TableCell sx={{ color: '#475569', fontWeight: 600 }}>{exitTime}</TableCell>
+                      {showLocation && <TableCell sx={{ color: '#475569', fontWeight: 600, fontSize: '0.75rem' }}>{location}</TableCell>}
                       <TableCell>
                         <Chip
                           size="small"
@@ -234,13 +260,12 @@ export default function HistoryTable({
                             fontWeight: 700,
                             fontSize: '0.7rem',
                             height: 24,
-                            bgcolor: record.is_field_work ? '#f5f3ff' : '#f0f9ff',
-                            color: record.is_field_work ? '#7c3aed' : '#0ea5e9',
+                            bgcolor: (workType as string) === 'Hybrid' ? '#fdf2f8' : (record.is_field_work ? '#f5f3ff' : '#f0f9ff'),
+                            color: (workType as string) === 'Hybrid' ? '#ec4899' : (record.is_field_work ? '#7c3aed' : '#0ea5e9'),
                             border: '1px solid transparent'
                           }}
                         />
                       </TableCell>
-                      <TableCell sx={{ color: '#475569', fontWeight: 600 }}>{location}</TableCell>
                       <TableCell sx={{ fontWeight: 800, color: '#598791' }}>{hours}</TableCell>
                       <TableCell>
                         <Chip
@@ -254,6 +279,15 @@ export default function HistoryTable({
                           }}
                         />
                       </TableCell>
+                      {onViewDetails && (
+                        <TableCell align="center">
+                          {!isAbsent ? (
+                            <IconButton size="small" onClick={() => onViewDetails(record)} sx={{ color: '#598791' }}>
+                              <Box sx={{ fontSize: '1.1rem' }}>👁️</Box>
+                            </IconButton>
+                          ) : '--'}
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })}

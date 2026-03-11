@@ -78,6 +78,7 @@ export default function App() {
           <Route path="employees" element={<Employees />} />
           <Route path="attendance" element={<Attendance />} />
           <Route path="attendance/employees" element={<AttendanceEmployees />} />
+          <Route path="attendance/dashboard" element={<EmployeeAttendanceDashboard />} />
           <Route path="attendance/my-attendance" element={<EmployeeAttendanceMyAttendance />} />
           <Route path="attendance/reports" element={<AttendanceReports />} />
           <Route path="face-enroll" element={<FaceEnroll />} />

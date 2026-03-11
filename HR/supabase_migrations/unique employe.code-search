@@ -1,0 +1,14 @@
+# Query: unique employe
+# ContextLines: 1
+
+2 results - 2 files
+
+VijayShipping\HR\src\attendance\components\admin\Reports.tsx:
+  895                                      <Paper sx={{ p: 2, borderRadius: '15px', border: '1px solid', borderColor: 'divider' }}>
+  896:                                         <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, textTransform: 'uppercase' }}>Unique Employees</Typography>
+  897                                          <Typography variant="h4" sx={{ fontWeight: 900, mt: 0.5 }}>{currentReport.summary.unique_employees}</Typography>
+
+C:\Users\nishi\.gemini\antigravity\brain\0a6c7600-2997-43f1-8004-c619531278c6\walkthrough.md.resolved:
+  25  - **Location Fixes**: Fixed location filtering and the "Location" column using the database `is_field_work` flag for absolute accuracy.
+  26: - **Summary Metrics**: Restored the summary cards (Uni Employees, Total Hours, etc.) at the top of the reports page.
+  27  - **Dashboard Cleanup**: Removed "Permission Hours" and "Network" status cards from the employee dashboard.

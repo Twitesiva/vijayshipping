@@ -1,10 +1,14 @@
 'use client';
 
 import * as React from 'react';
-import { Box, Card, CardContent, Grid, Stack, Typography, Chip, TextField, Button } from '@mui/material';
+import { Box, Card, CardContent, Grid, Stack, Typography, Chip, TextField, Button, Dialog, DialogTitle, DialogContent, Divider, IconButton, Table, TableHead, TableRow, TableCell, TableBody, MenuItem, DialogActions } from '@mui/material';
+import { Download as DownloadIcon } from '@mui/icons-material';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import HistoryTable, { HistoryRecord } from './HistoryTable';
-import { apiFetch } from '../../lib/api';
-import { getUser } from '../../lib/storage';
+import { apiFetch, API_BASE } from '../../lib/api';
+import { getUser, getToken } from '../../lib/storage';
+import { formatDate, formatTime } from '../../lib/format';
 
 const getTodayISO = () => new Date().toISOString().split('T')[0];
 const getFirstOfMonthISO = () => {
@@ -19,11 +23,47 @@ export default function EmployeeDashboard() {
   const [sessionActive, setSessionActive] = React.useState(false);
   const [error, setError] = React.useState('');
   const [selectedFilter, setSelectedFilter] = React.useState<'all' | 'present' | 'absent' | 'last_activity'>('all');
+  const [timePeriod, setTimePeriod] = React.useState<string>('month');
 
   const [dateFrom, setDateFrom] = React.useState(getFirstOfMonthISO());
   const [dateTo, setDateTo] = React.useState(getTodayISO());
+  const [attendanceType, setAttendanceType] = React.useState('all');
+
+  // Drill-down state
+  const [drillDownOpen, setDrillDownOpen] = React.useState(false);
+  const [selectedDaySessions, setSelectedDaySessions] = React.useState<any[]>([]);
+  const [selectedDayInfo, setSelectedDayInfo] = React.useState<any>(null);
+
+  // Download states
+  const [downloadDialogOpen, setDownloadDialogOpen] = React.useState(false);
+  const [downloadOption, setDownloadOption] = React.useState('summary');
+  const [exporting, setExporting] = React.useState(false);
 
   const user = getUser() as any;
+
+  const handleTimePeriodChange = (period: string) => {
+    setTimePeriod(period);
+    const today = new Date();
+    let from = getTodayISO();
+    let to = getTodayISO();
+
+    if (period === 'week') {
+      const day = today.getDay();
+      const diff = today.getDate() - day + (day === 0 ? -6 : 1); // Monday
+      const monday = new Date(today.setDate(diff));
+      from = monday.toISOString().split('T')[0];
+      to = getTodayISO();
+    } else if (period === 'month') {
+      from = getFirstOfMonthISO();
+      to = getTodayISO();
+    } else if (period === 'custom') {
+      return; // Handled by date pickers
+    }
+
+    setDateFrom(from);
+    setDateTo(to);
+    loadDashboard(from, to);
+  };
 
   const loadDashboard = async (from = dateFrom, to = dateTo) => {
     setLoading(true);
@@ -72,9 +112,8 @@ export default function EmployeeDashboard() {
     : '--';
 
   const now = new Date();
-  const monthDaysElapsed = now.getDate();
-  const presentDaysThisMonth = stats?.present_days ?? 0;
-  const absentDaysThisMonth = Math.max(monthDaysElapsed - presentDaysThisMonth, 0);
+  const presentDays = stats?.present_days ?? 0;
+  const absentDays = stats?.absent_days ?? 0;
   const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   // Generate absent records
@@ -88,7 +127,7 @@ export default function EmployeeDashboard() {
       // check if this date exists in records (ignoring time) 
       // Note: with limit=50, we might miss old records if there are many entries per day.
       // But for simple "Absent" list in dashboard, this is usually sufficient.
-      const exists = records.some(r => r.check_in && new Date(r.check_in).toISOString().startsWith(dateStr));
+      const exists = records.some((r: any) => r.check_in && new Date(r.check_in).toISOString().startsWith(dateStr));
 
       if (!exists && d !== today.getDate()) {
         absentRecords.push({
@@ -109,16 +148,77 @@ export default function EmployeeDashboard() {
 
 
   const getFilteredRecords = () => {
-    switch (selectedFilter) {
-      case 'present':
-        return records.filter((r) => r.check_in && new Date(r.check_in).toISOString().slice(0, 7) === monthPrefix);
-      case 'absent':
-        return generateAbsentRecords();
-      case 'last_activity':
-        return records.slice(0, 1);
-      default:
-        return records;
+    let list = records;
+    if (selectedFilter === 'present') {
+      list = records.filter((r: any) => r.check_in && new Date(r.check_in).toISOString().slice(0, 7) === monthPrefix);
+    } else if (selectedFilter === 'absent') {
+      return generateAbsentRecords();
     }
+
+    // Now aggregate into daily summaries
+    const grouped: Record<string, any> = {};
+    list.forEach((r: any) => {
+      const date = r.date || (r.check_in ? r.check_in.split('T')[0] : '');
+      if (!date) return;
+
+      if (!grouped[date]) {
+        grouped[date] = {
+          ...r,
+          date,
+          sessions: [r],
+          check_in: r.check_in,
+          check_out: r.check_out,
+          total_hours: r.total_hours || 0,
+          attendance_type: r.is_field_work ? 'Field' : 'Office'
+        };
+      } else {
+        const existing = grouped[date];
+        existing.sessions.push(r);
+        if (r.check_in && (!existing.check_in || new Date(r.check_in) < new Date(existing.check_in))) {
+          existing.check_in = r.check_in;
+        }
+        if (!r.check_out) {
+          existing.check_out = null; // Still active
+        } else if (existing.check_out && new Date(r.check_out) > new Date(existing.check_out)) {
+          existing.check_out = r.check_out;
+        }
+        existing.total_hours += (r.total_hours || 0);
+        const currentType = r.is_field_work ? 'Field' : 'Office';
+        if (existing.attendance_type !== currentType && existing.attendance_type !== 'Hybrid') {
+          existing.attendance_type = 'Hybrid';
+        }
+      }
+    });
+
+    // Finalize formatted duration for aggregated rows
+    const aggregated = Object.values(grouped).map((r: any) => {
+      const hours = r.total_hours || 0;
+      let formatted_duration = '--';
+      if (hours > 0) {
+        const hrs = Math.floor(hours);
+        const mins = Math.round((hours - hrs) * 60);
+        if (mins === 0) {
+          formatted_duration = `${hrs} hr`;
+        } else if (hrs === 0) {
+          formatted_duration = `${mins} min`;
+        } else {
+          formatted_duration = `${hrs} hr ${mins} min`;
+        }
+      }
+      return {
+        ...r,
+        formatted_duration
+      };
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    if (selectedFilter === 'last_activity') {
+      return aggregated.slice(0, 1);
+    }
+
+    if (attendanceType !== 'all') {
+      return aggregated.filter((r: any) => r.attendance_type === attendanceType);
+    }
+    return aggregated;
   };
 
   const filteredRecords = getFilteredRecords();
@@ -141,8 +241,8 @@ export default function EmployeeDashboard() {
     {
       id: 'present',
       label: 'Present',
-      value: String(presentDaysThisMonth),
-      subtitle: 'This month',
+      value: String(presentDays),
+      subtitle: timePeriod === 'month' ? 'This month' : timePeriod === 'week' ? 'This week' : 'Selected range',
       accent: '#059669',
       bgColor: '#ecfdf5',
       onClick: () => handleCardClick('present')
@@ -150,8 +250,8 @@ export default function EmployeeDashboard() {
     {
       id: 'absent',
       label: 'Absent',
-      value: String(absentDaysThisMonth),
-      subtitle: 'This month',
+      value: String(absentDays),
+      subtitle: timePeriod === 'month' ? 'This month' : timePeriod === 'week' ? 'This week' : 'Selected range',
       accent: '#dc2626',
       bgColor: '#fef2f2',
       onClick: () => handleCardClick('absent')
@@ -176,8 +276,243 @@ export default function EmployeeDashboard() {
     }
   ];
 
+  const openDrillDown = (record: any) => {
+    const dayRecords = records.filter((r: any) => 
+      (r.check_in && r.check_in.split('T')[0] === record.date) || 
+      (r.date === record.date)
+    );
+    
+    setSelectedDaySessions(dayRecords);
+    setSelectedDayInfo({
+      full_name: user?.full_name,
+      date: record.date || record.check_in?.split('T')[0]
+    });
+    setDrillDownOpen(true);
+  };
+
+  const handleDownloadCSV = () => {
+    if (filteredRecords.length === 0) return;
+    const headers = ["Date", "Login", "Logout", "Duration", "Type"];
+    const rows = filteredRecords.map((r: any) => [
+      r.date,
+      r.check_in ? formatTime(r.check_in) : '--',
+      r.check_out ? formatTime(r.check_out) : (r.check_in ? 'Active' : '--'),
+      r.formatted_duration,
+      r.attendance_type
+    ]);
+
+    const csvContent = "\uFEFF" + [headers, ...rows].map((e: any[]) => e.map((cell: any) => `"${(cell || '').toString().replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `My_Attendance_Summary_${dateFrom}_to_${dateTo}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setDownloadDialogOpen(false);
+  };
+
+  const handleDownloadPDF = () => {
+    if (filteredRecords.length === 0) return;
+    const doc = new jsPDF();
+    doc.text("My Attendance Summary", 14, 15);
+    doc.setFontSize(10);
+    doc.text(`Employee: ${user?.full_name || user?.username}`, 14, 22);
+    doc.text(`Period: ${dateFrom} to ${dateTo}`, 14, 28);
+
+    const tableColumn = ["Date", "Login", "Logout", "Duration", "Type"];
+    const tableRows = filteredRecords.map((r: any) => [
+      r.date,
+      r.check_in ? formatTime(r.check_in) : '--',
+      r.check_out ? formatTime(r.check_out) : (r.check_in ? 'Active' : '--'),
+      r.formatted_duration,
+      r.attendance_type
+    ]);
+
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 35,
+      theme: 'striped',
+      styles: { fontSize: 9 }
+    });
+
+    doc.save(`My_Attendance_Summary_${dateFrom}_to_${dateTo}.pdf`);
+    setDownloadDialogOpen(false);
+  };
+
+  const handleDownloadDetailedLogs = async (format: 'csv' | 'pdf') => {
+    setExporting(true);
+    try {
+      const token = getToken();
+      const params = new URLSearchParams({
+        date_from: dateFrom,
+        date_to: dateTo,
+        employee_id: user?.employee_id,
+        limit: '5000'
+      });
+
+      const response = await fetch(`${API_BASE}/admin/attendance-records?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch detailed records');
+      const data = await response.json();
+      const records = data.records || [];
+
+      if (records.length === 0) {
+        alert('No records found for the selected period.');
+        return;
+      }
+
+      if (format === 'csv') {
+        const headers = ["Date", "Login", "Logout", "Duration", "Type", "Location"];
+        const rows = records.map((r: any) => [
+          formatDate(r.check_in),
+          formatTime(r.check_in),
+          formatTime(r.check_out),
+          r.formatted_duration,
+          r.is_field_work ? 'Field' : 'Office',
+          r.entry_location_display || 'Office'
+        ]);
+
+        const csvContent = "\uFEFF" + [headers, ...rows].map((e: any[]) => e.map((cell: any) => `"${(cell || '').toString().replace(/"/g, '""')}"`).join(",")).join("\n");
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", `My_Detailed_Attendance_${dateFrom}_to_${dateTo}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } else {
+        const doc = new jsPDF('landscape');
+        doc.text("My Detailed Attendance Logs", 14, 15);
+        doc.setFontSize(10);
+        doc.text(`Employee: ${user?.full_name || user?.username} (ID: ${user?.employee_id})`, 14, 22);
+        doc.text(`Period: ${dateFrom} to ${dateTo}`, 14, 28);
+
+        const tableColumn = ["Date", "Login", "Logout", "Duration", "Type", "Location"];
+        const tableRows = records.map((r: any) => [
+          formatDate(r.check_in),
+          formatTime(r.check_in),
+          formatTime(r.check_out),
+          r.formatted_duration,
+          r.is_field_work ? 'Field' : 'Office',
+          r.entry_location_display || 'Office'
+        ]);
+
+        autoTable(doc, {
+          head: [tableColumn],
+          body: tableRows,
+          startY: 35,
+          theme: 'striped',
+          styles: { fontSize: 8 },
+          columnStyles: { 5: { cellWidth: 70 } }
+        });
+
+        doc.save(`My_Detailed_Attendance_${dateFrom}_to_${dateTo}.pdf`);
+      }
+      setDownloadDialogOpen(false);
+    } catch (err: any) {
+      alert(err.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Stack spacing={2}>
+      {/* Drill-down Dialog */}
+      <Dialog open={drillDownOpen} onClose={() => setDrillDownOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ pb: 1 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Box>
+              <Typography variant="h6" fontWeight={800} color="#1e293b">Attendance Details</Typography>
+              <Typography variant="body2" color="#64748b" fontWeight={500}>
+                {selectedDayInfo?.date ? new Date(selectedDayInfo.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : ''}
+              </Typography>
+            </Box>
+            <IconButton onClick={() => setDrillDownOpen(false)} size="small">
+              <Box sx={{ fontSize: '1.2rem' }}>✕</Box>
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <Divider />
+        <DialogContent sx={{ p: 0 }}>
+          <Table size="small">
+            <TableHead>
+              <TableRow sx={{ bgcolor: '#f8fafc' }}>
+                <TableCell sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.75rem', py: 1.5 }}>Login</TableCell>
+                <TableCell sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.75rem' }}>Logout</TableCell>
+                <TableCell sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.75rem' }}>Location</TableCell>
+                <TableCell sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.75rem' }}>Type</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.75rem' }}>Duration</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {selectedDaySessions.length > 0 ? selectedDaySessions.map((s: any, i: number) => (
+                <TableRow key={i} sx={{ '&:hover': { bgcolor: '#f1f5f9' } }}>
+                  <TableCell sx={{ fontWeight: 600, color: '#1e293b' }}>
+                    {s.check_in ? new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                  </TableCell>
+                  <TableCell sx={{ fontWeight: 600, color: '#1e293b' }}>
+                    {s.check_out ? new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (s.check_in ? 'Active' : '--')}
+                  </TableCell>
+                  <TableCell sx={{ minWidth: 200, py: 1.5 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 500, color: '#475569', whiteSpace: 'normal', lineBreak: 'anywhere' }}>
+                      {s.entry_location_display || s.location_name || s.address || 'Office'}
+                    </Typography>
+                  </TableCell>
+                  <TableCell>
+                    <Chip 
+                      label={s.is_field_work ? 'Field' : 'Office'} 
+                      size="small" 
+                      sx={{ 
+                        fontWeight: 700, 
+                        fontSize: '0.65rem', 
+                        height: 20,
+                        bgcolor: s.is_field_work ? '#f5f3ff' : '#eff6ff',
+                        color: s.is_field_work ? '#7c3aed' : '#3b82f6'
+                      }} 
+                    />
+                  </TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 800, color: '#598791' }}>
+                    {s.formatted_duration || (s.total_hours ? (() => {
+                      const hours = s.total_hours;
+                      if (hours <= 0) return '--';
+                      const hrs = Math.floor(hours);
+                      const mins = Math.round((hours - hrs) * 60);
+                      if (mins === 0) return `${hrs} hr`;
+                      else if (hrs === 0) return `${mins} min`;
+                      else return `${hrs} hr ${mins} min`;
+                    })() : '--')}
+                  </TableCell>
+                </TableRow>
+              )) : (
+                <TableRow>
+                  <TableCell colSpan={5 as any} align="center" sx={{ py: 3 }}>
+                    <Typography variant="body2" color="text.secondary">No detailed logs found.</Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </DialogContent>
+        <Box sx={{ p: 2, display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid', borderColor: 'divider' }}>
+          <Button 
+            onClick={() => setDrillDownOpen(false)} 
+            variant="outlined" 
+            size="small"
+            sx={{ borderRadius: '8px', fontWeight: 700, textTransform: 'none' }}
+          >
+            Close
+          </Button>
+        </Box>
+      </Dialog>
       <Card sx={{ borderRadius: '16px', border: '1px solid', borderColor: 'divider', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)', overflow: 'hidden' }}>
         <CardContent sx={{ p: 2.5, background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
@@ -191,69 +526,138 @@ export default function EmployeeDashboard() {
             </Box>
 
             <Stack direction="row" spacing={1.5} alignItems="center">
-              <TextField
-                type="date"
-                size="small"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                InputLabelProps={{ shrink: true }}
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: '8px',
-                    bgcolor: 'white',
-                    fontSize: '0.8rem'
-                  },
-                  '& input': { py: 0.75, fontSize: '0.8rem' }
-                }}
-              />
-              <TextField
-                type="date"
-                size="small"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                InputLabelProps={{ shrink: true }}
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    borderRadius: '8px',
-                    bgcolor: 'white',
-                    fontSize: '0.8rem'
-                  },
-                  '& input': { py: 0.75, fontSize: '0.8rem' }
-                }}
-              />
               <Button
-                variant="contained"
+                variant="outlined"
                 size="small"
-                onClick={() => loadDashboard(dateFrom, dateTo)}
+                startIcon={<DownloadIcon />}
+                onClick={() => setDownloadDialogOpen(true)}
                 sx={{
                   height: 34,
                   borderRadius: '8px',
-                  bgcolor: '#598791',
                   textTransform: 'none',
                   fontWeight: 600,
                   px: 2,
-                  fontSize: '0.8rem',
-                  '&:hover': { bgcolor: '#4a727a' }
+                  borderColor: '#598791',
+                  color: '#598791',
+                  '&:hover': { borderColor: '#4a727a', bgcolor: 'rgba(89, 135, 145, 0.04)' }
                 }}
               >
-                Filter
+                Download
               </Button>
+              <TextField
+                select
+                size="small"
+                label="Type"
+                value={attendanceType}
+                onChange={(e: any) => setAttendanceType(e.target.value)}
+                SelectProps={{ native: true }}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: '8px',
+                    bgcolor: 'white',
+                    fontSize: '0.8rem',
+                    minWidth: 100
+                  },
+                  '& select': { py: 0.75, fontSize: '0.8rem' },
+                  '& label': { fontSize: '0.8rem' }
+                }}
+              >
+                <option value="all">All Types</option>
+                <option value="Office">Office</option>
+                <option value="Field">Field</option>
+                <option value="Hybrid">Hybrid</option>
+              </TextField>
+              <TextField
+                select
+                size="small"
+                value={timePeriod}
+                onChange={(e) => handleTimePeriodChange(e.target.value)}
+                SelectProps={{ native: true }}
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: '8px',
+                    bgcolor: 'white',
+                    fontSize: '0.8rem',
+                    minWidth: 120
+                  },
+                  '& select': { py: 0.75, fontSize: '0.8rem' }
+                }}
+              >
+                <option value="today">Today</option>
+                <option value="week">This Week</option>
+                <option value="month">This Month</option>
+                <option value="custom">Custom Range</option>
+              </TextField>
+
+              {timePeriod === 'custom' && (
+                <>
+                  <TextField
+                    type="date"
+                    size="small"
+                    value={dateFrom}
+                    onChange={(e: any) => setDateFrom(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: '8px',
+                        bgcolor: 'white',
+                        fontSize: '0.8rem'
+                      },
+                      '& input': { py: 0.75, fontSize: '0.8rem' }
+                    }}
+                  />
+                  <TextField
+                    type="date"
+                    size="small"
+                    value={dateTo}
+                    onChange={(e: any) => setDateTo(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        borderRadius: '8px',
+                        bgcolor: 'white',
+                        fontSize: '0.8rem'
+                      },
+                      '& input': { py: 0.75, fontSize: '0.8rem' }
+                    }}
+                  />
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={() => loadDashboard(dateFrom, dateTo)}
+                    sx={{
+                      height: 34,
+                      borderRadius: '8px',
+                      bgcolor: '#598791',
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      px: 2,
+                      fontSize: '0.8rem',
+                      '&:hover': { bgcolor: '#4a727a' }
+                    }}
+                  >
+                    Filter
+                  </Button>
+                </>
+              )}
             </Stack>
 
             {selectedFilter !== 'all' && (
-              <Chip
-                label="Clear"
-                size="small"
-                onDelete={() => setSelectedFilter('all')}
-                sx={{
-                  borderRadius: '8px',
-                  fontWeight: 600,
-                  bgcolor: '#f1f5f9',
-                  color: '#598791',
-                  border: '1px solid #e2e8f0',
-                  fontSize: '0.7rem'
-                }}
-              />
+              <Box>
+                <Chip
+                  label="Clear"
+                  size="small"
+                  onDelete={() => setSelectedFilter('all')}
+                  sx={{
+                    borderRadius: '8px',
+                    fontWeight: 600,
+                    bgcolor: '#f1f5f9',
+                    color: '#598791',
+                    border: '1px solid #e2e8f0',
+                    fontSize: '0.7rem'
+                  }}
+                />
+              </Box>
             )}
           </Stack>
 
@@ -337,19 +741,97 @@ export default function EmployeeDashboard() {
         <HistoryTable
           loading={loading}
           records={filteredRecords}
-          enablePagination={selectedFilter === 'all'} // specific filters might be short enough to skip pagination or keep it?
-          rowsPerPage={selectedFilter === 'all' ? 3 : 10}
-          formatDurationFromHours={(h) => `${(h || 0).toFixed(2)} hrs`}
+          showLocation={false}
+          onViewDetails={openDrillDown}
+          enablePagination={selectedFilter === 'all'} 
+          rowsPerPage={6}
+          formatDurationFromHours={(h) => {
+            if (!h || h <= 0) return '--';
+            const hrs = Math.floor(h);
+            const mins = Math.round((h - hrs) * 60);
+            if (mins === 0) return `${hrs} hr`;
+            else if (hrs === 0) return `${mins} min`;
+            else return `${hrs} hr ${mins} min`;
+          }}
           formatDurationFromTimes={(en, ex) => {
-            if (!en || !ex) return '-';
+            if (!en || !ex) return '--';
             const start = new Date(en);
             const end = new Date(ex);
-            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return '-';
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return '--';
             const totalHours = (end.getTime() - start.getTime()) / 3600000;
-            return `${totalHours.toFixed(2)} hrs`;
+            if (totalHours <= 0) return '--';
+            const hrs = Math.floor(totalHours);
+            const mins = Math.round((totalHours - hrs) * 60);
+            if (mins === 0) return `${hrs} hr`;
+            else if (hrs === 0) return `${mins} min`;
+            else return `${hrs} hr ${mins} min`;
           }}
         />
       </Box>
+
+      {/* Download Dialog */}
+      <Dialog 
+        open={downloadDialogOpen} 
+        onClose={() => !exporting && setDownloadDialogOpen(false)}
+        maxWidth="xs" 
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: '20px', p: 1 }
+        }}
+      >
+        <DialogTitle>
+          <Stack direction="row" alignItems="center" gap={1}>
+            <DownloadIcon color="primary" />
+            <Typography variant="h6" fontWeight={800}>Download Records</Typography>
+          </Stack>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={3} sx={{ mt: 1 }}>
+            <TextField
+              select
+              fullWidth
+              label="What would you like to download?"
+              value={downloadOption}
+              onChange={(e: any) => setDownloadOption(e.target.value)}
+            >
+              <MenuItem value="summary">Attendance Summary (Aggregated View)</MenuItem>
+              <MenuItem value="logs">Detailed Attendance Logs (All Records)</MenuItem>
+            </TextField>
+
+            <Box sx={{ p: 2, borderRadius: '12px', bgcolor: 'grey.50', border: '1px solid', borderColor: 'divider' }}>
+              <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                CURRENT FILTERS
+              </Typography>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                Period: {formatDate(dateFrom)} to {formatDate(dateTo)}
+              </Typography>
+            </Box>
+
+            <Typography variant="body2" color="text.secondary">
+              Downloading {downloadOption === 'summary' ? 'Summary' : 'Detailed Records'} for the current filters.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          <Button 
+            fullWidth 
+            variant="outlined" 
+            onClick={() => downloadOption === 'summary' ? handleDownloadCSV() : handleDownloadDetailedLogs('csv')}
+            disabled={exporting}
+          >
+            CSV
+          </Button>
+          <Button 
+            fullWidth 
+            variant="contained" 
+            onClick={() => downloadOption === 'summary' ? handleDownloadPDF() : handleDownloadDetailedLogs('pdf')}
+            disabled={exporting}
+            sx={{ bgcolor: '#598791', '&:hover': { bgcolor: '#4a727a' } }}
+          >
+            {exporting ? 'Processing...' : 'PDF'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   );
 }

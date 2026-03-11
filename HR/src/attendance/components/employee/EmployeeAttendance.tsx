@@ -41,6 +41,8 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
   const [locationColor, setLocationColor] = React.useState('info.main');
   const [networkStatus, setNetworkStatus] = React.useState('Detecting...');
   const [networkColor, setNetworkColor] = React.useState('info.main');
+  const [isWithinOffice, setIsWithinOffice] = React.useState<boolean | null>(null);
+  const [officeDistanceMeters, setOfficeDistanceMeters] = React.useState<number | null>(null);
 
   const [currentLocation, setCurrentLocation] = React.useState<{ latitude: number; longitude: number } | null>(null);
   const [currentLocationAddress, setCurrentLocationAddress] = React.useState<string>('');
@@ -359,6 +361,11 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
   const markAttendance = async (type: 'entry' | 'exit') => {
     if (!currentLocation) return showAlert('Location required', 'error');
     if (!buttonsEnabled) return showAlert('Face verification required', 'error');
+    // Enforce geofence for office attendance
+    if (!isFieldWork && isWithinOffice === false) {
+      const dist = officeDistanceMeters !== null ? ` (${Math.round(officeDistanceMeters)}m away)` : '';
+      return showAlert(`You are outside the office zone${dist}. Switch to Field Work or move within 500m of the office.`, 'error');
+    }
     if (type === 'entry' && hasActiveSession) return showAlert('Already logged in. Please logout first.', 'info');
     if (type === 'exit' && !hasActiveSession) return showAlert('No active session. Please login first.', 'info');
 
@@ -394,7 +401,24 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
     } catch (err) { showAlert('Error marking attendance', 'error'); }
   };
 
+  const checkGeofence = async (latitude: number, longitude: number) => {
+    try {
+      const res = await apiFetch(
+        `/attendance/check-geofence?lat=${encodeURIComponent(String(latitude))}&lng=${encodeURIComponent(String(longitude))}`
+      );
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setIsWithinOffice(!!data.is_within_geofence);
+        setOfficeDistanceMeters(typeof data.distance_meters === 'number' ? data.distance_meters : null);
+      }
+    } catch (err) {
+      console.error('Geofence check error:', err);
+    }
+  };
+
   const resolveLocationAddress = async (latitude: number, longitude: number) => {
+    // Run geofence check in parallel with address lookup
+    void checkGeofence(latitude, longitude);
     try {
       const res = await apiFetch(
         `/attendance/geocode?lat=${encodeURIComponent(String(latitude))}&lng=${encodeURIComponent(String(longitude))}`
@@ -611,8 +635,17 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
   const totalOfficeHoursRaw = todayRecords.filter(r => !r.is_field_work).reduce((sum, r) => sum + Number(r.total_hours || 0), 0);
   const totalFieldHoursRaw = todayRecords.filter(r => !!r.is_field_work).reduce((sum, r) => sum + Number(r.total_hours || 0), 0);
 
-  const todayOfficeHours = totalOfficeHoursRaw.toFixed(2);
-  const todayFieldHours = totalFieldHoursRaw.toFixed(2);
+  const formatHours = (hours: number) => {
+    if (!hours || hours <= 0) return '--';
+    const hrs = Math.floor(hours);
+    const mins = Math.round((hours - hrs) * 60);
+    if (mins === 0) return `${hrs} hr`;
+    else if (hrs === 0) return `${mins} min`;
+    else return `${hrs} hr ${mins} min`;
+  };
+
+  const todayOfficeHours = formatHours(totalOfficeHoursRaw);
+  const todayFieldHours = formatHours(totalFieldHoursRaw);
   const todayPermissionHours = todayRecords.reduce((sum, record) => sum + Number(record.permission_hours || 0), 0);
 
   const latestRecord = historyRecords[0];
@@ -631,30 +664,9 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
             background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)'
           }}>
             <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
-              <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" spacing={3} alignItems={{ xs: 'flex-start', md: 'center' }}>
-                <Box>
-                  <Typography variant="h4" sx={{ fontWeight: 700, mb: 1, color: '#0f172a', letterSpacing: '-0.02em' }}>
-                    Welcome, <Box component="span" sx={{ color: '#598791', fontWeight: 800 }}>{employeeName}</Box>
-                  </Typography>
-                  <Typography variant="body1" sx={{ color: '#64748b', fontWeight: 500, maxWidth: '600px' }}>
-                    Ready to start your day? Track your attendance, verify your identity, and manage your daily logs securely.
-                  </Typography>
-                </Box>
-                <Stack direction="row" spacing={1.5} flexWrap="wrap">
-                  <Chip
-                    label={`Daily Logs: ${todayRecords.length}`}
-                    sx={{ borderRadius: '10px', fontWeight: 700, bgcolor: 'white', border: '1px solid #e2e8f0', color: '#598791' }}
-                  />
-                  <Chip
-                    label={`Office: ${todayOfficeHours} hrs`}
-                    sx={{ borderRadius: '10px', fontWeight: 700, bgcolor: 'white', border: '1px solid #e2e8f0', color: '#059669' }}
-                  />
-                  <Chip
-                    label={`Field: ${todayFieldHours} hrs`}
-                    sx={{ borderRadius: '10px', fontWeight: 700, bgcolor: 'white', border: '1px solid #e2e8f0', color: '#7c3aed' }}
-                  />
-                </Stack>
-              </Stack>
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em', fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+                Welcome, <Box component="span" sx={{ color: '#598791', fontWeight: 700, fontFamily: "'Segoe UI', system-ui, sans-serif" }}>{employeeName}</Box>
+              </Typography>
             </CardContent>
           </Card>
 
@@ -683,9 +695,6 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
                       <Typography variant="h4" sx={{ fontWeight: 900, color: '#1e293b' }}>
                         {item.value}
                       </Typography>
-                      <Typography variant="body2" sx={{ ml: 0.5, color: '#64748b', fontWeight: 600 }}>
-                        {item.label.includes('Hours') || item.label.includes('Work') ? 'hrs' : ''}
-                      </Typography>
                     </Box>
                     <Typography variant="caption" sx={{ color: '#64748b', mt: 1, fontWeight: 500, display: 'block' }}>
                       {item.helper}
@@ -705,14 +714,16 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
         onMarkEntry={() => markAttendance('entry')}
         onMarkExit={() => markAttendance('exit')}
         canStart={!cameraActive}
-        canMarkEntry={buttonsEnabled && !hasActiveSession}
-        canMarkExit={buttonsEnabled && hasActiveSession}
+        canMarkEntry={buttonsEnabled && !hasActiveSession && (isFieldWork || isWithinOffice === true || isWithinOffice === null)}
+        canMarkExit={buttonsEnabled && hasActiveSession && (isFieldWork || isWithinOffice === true || isWithinOffice === null)}
         cameraActive={cameraActive}
         faceStatus={faceStatus}
         attendanceStatus={
-          buttonsEnabled
-            ? (hasActiveSession ? 'Verification complete. Logout is enabled.' : 'Verification complete. Login is enabled.')
-            : 'Verification required before attendance action.'
+          !isFieldWork && isWithinOffice === false
+            ? `⛔ Office attendance blocked — you are outside the office zone${officeDistanceMeters !== null ? ` (${Math.round(officeDistanceMeters)}m away)` : ''}. Switch to Field Work or move closer.`
+            : buttonsEnabled
+              ? (hasActiveSession ? 'Verification complete. Logout is enabled.' : 'Verification complete. Login is enabled.')
+              : 'Verification required before attendance action.'
         }
       />
       <Box sx={{ px: 3, mb: 1 }}>
@@ -733,23 +744,45 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
         items={[
           { label: 'Session Status', value: sessionStatus, color: sessionStatusColor },
           { label: 'Location', value: locationStatus, color: locationColor },
-          { label: 'Face Recognition', value: faceRecognitionStatus, color: faceRecognitionStatus === 'Active' ? 'success.main' : 'info.main' }
+          { label: 'Face Recognition', value: faceRecognitionStatus, color: faceRecognitionStatus === 'Active' ? 'success.main' : 'info.main' },
+          {
+            label: 'Office Zone',
+            value: isWithinOffice === null
+              ? 'Checking…'
+              : isWithinOffice
+                ? `✅ Within range${officeDistanceMeters !== null ? ` (${Math.round(officeDistanceMeters)}m)` : ''}`
+                : `❌ Outside range${officeDistanceMeters !== null ? ` (${Math.round(officeDistanceMeters)}m away)` : ''}`,
+            color: isWithinOffice === null ? 'info.main' : isWithinOffice ? 'success.main' : 'error.main'
+          }
         ]}
       />
       {showHistory && (
         <HistoryTable
           loading={historyLoading}
           records={pathname?.startsWith('/employee-dashboard/dashboard') ? dashboardHistoryRecords : historyRecords}
+          showLocation={true}
           enablePagination={pathname?.startsWith('/employee-dashboard/dashboard')}
-          rowsPerPage={3}
-          formatDurationFromHours={(h) => (h || 0).toFixed(2)}
+          rowsPerPage={6}
+          formatDurationFromHours={(h) => {
+            if (!h || h <= 0) return '--';
+            const hrs = Math.floor(h);
+            const mins = Math.round((h - hrs) * 60);
+            if (mins === 0) return `${hrs} hr`;
+            else if (hrs === 0) return `${mins} min`;
+            else return `${hrs} hr ${mins} min`;
+          }}
           formatDurationFromTimes={(en, ex) => {
-            if (!en || !ex) return '-';
+            if (!en || !ex) return '--';
             const start = new Date(en);
             const end = new Date(ex);
-            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return '-';
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return '--';
             const totalHours = (end.getTime() - start.getTime()) / 3600000;
-            return totalHours.toFixed(2) + ' hrs';
+            if (totalHours <= 0) return '--';
+            const hrs = Math.floor(totalHours);
+            const mins = Math.round((totalHours - hrs) * 60);
+            if (mins === 0) return `${hrs} hr`;
+            else if (hrs === 0) return `${mins} min`;
+            else return `${hrs} hr ${mins} min`;
           }}
         />
       )}

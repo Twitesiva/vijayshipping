@@ -12,6 +12,9 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     // Tell Vite to read .env from the project root for import.meta.env
     envDir: rootDir,
+    optimizeDeps: {
+      include: ['jspdf', 'jspdf-autotable'],
+    },
     server: {
       proxy: {
         "/api/v1": {

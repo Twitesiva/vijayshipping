@@ -217,8 +217,17 @@ export default function EmployeeReports() {
     [records]
   );
 
-  const officeHours = `${totalOfficeHours.toFixed(2)} hrs`;
-  const fieldHours = `${totalFieldHours.toFixed(2)} hrs`;
+  const formatHours = (hours: number) => {
+    if (!hours || hours <= 0) return '--';
+    const hrs = Math.floor(hours);
+    const mins = Math.round((hours - hrs) * 60);
+    if (mins === 0) return `${hrs} hr`;
+    else if (hrs === 0) return `${mins} min`;
+    else return `${hrs} hr ${mins} min`;
+  };
+
+  const officeHours = formatHours(totalOfficeHours);
+  const fieldHours = formatHours(totalFieldHours);
 
   const totalDays = React.useMemo(() => {
     const days = new Set<string>();
@@ -299,7 +308,7 @@ export default function EmployeeReports() {
         work_type: r.is_field_work ? 'Field' : 'Office',
         entryLocation: r.entry_location_name || r.entry_location_display || r.location_name || r.zone_name || '--',
         exitLocation: r.exit_location_name || r.exit_location_display || (r.check_out ? (r.location_name || r.zone_name || 'Same as Entry') : '--'),
-        duration: r.formatted_duration || (r.total_hours ? `${Number(r.total_hours).toFixed(2)} hrs` : '--'),
+        duration: r.formatted_duration || formatHours(Number(r.total_hours) || 0),
         status: String(r.status || '').toLowerCase() === 'active' ? 'Logged In' : 'Logged Out'
       }))
       .sort((a, b) => b.sortKey.localeCompare(a.sortKey));
@@ -521,16 +530,29 @@ export default function EmployeeReports() {
         <HistoryTable
           loading={loading}
           records={records}
+          showLocation={true}
           enablePagination
-          rowsPerPage={5}
-          formatDurationFromHours={(h) => `${(h || 0).toFixed(2)} hrs`}
+          rowsPerPage={6}
+          formatDurationFromHours={(h) => {
+            if (!h || h <= 0) return '--';
+            const hrs = Math.floor(h);
+            const mins = Math.round((h - hrs) * 60);
+            if (mins === 0) return `${hrs} hr`;
+            else if (hrs === 0) return `${mins} min`;
+            else return `${hrs} hr ${mins} min`;
+          }}
           formatDurationFromTimes={(entry, exit) => {
-            if (!entry || !exit) return '-';
+            if (!entry || !exit) return '--';
             const start = new Date(entry);
             const end = new Date(exit);
-            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return '-';
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return '--';
             const totalHours = (end.getTime() - start.getTime()) / 3600000;
-            return `${totalHours.toFixed(2)} hrs`;
+            if (totalHours <= 0) return '--';
+            const hrs = Math.floor(totalHours);
+            const mins = Math.round((totalHours - hrs) * 60);
+            if (mins === 0) return `${hrs} hr`;
+            else if (hrs === 0) return `${mins} min`;
+            else return `${hrs} hr ${mins} min`;
           }}
         />
       </Box>

@@ -1,7 +1,22 @@
 from __future__ import annotations
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import List, Dict, Any, Optional
 from database import get_supabase
+
+
+def format_duration(hours: float) -> str:
+    """Convert decimal hours to 'X hr Y min' format"""
+    if hours <= 0:
+        return "--"
+    hrs = int(hours)
+    mins = int(round((hours - hrs) * 60))
+    if mins == 0:
+        return f"{hrs} hr"
+    elif hrs == 0:
+        return f"{mins} min"
+    else:
+        return f"{hrs} hr {mins} min"
+
 
 class AdminService:
     def __init__(self):
@@ -141,8 +156,27 @@ class AdminService:
                 sessions = emp_sessions_map.get(emp_id, [])
                 
                 if sessions:
-                    # Aggregate multiple sessions
-                    total_work_hours = sum(s.get("total_hours", 0) for s in sessions)
+                    # Aggregate multiple sessions - calculate real-time duration for active sessions
+                    total_work_hours = 0
+                    for s in sessions:
+                        sess_hours = s.get("total_hours", 0)
+                        # If session is still active (no check_out), calculate real-time duration
+                        if s.get("check_out") is None and s.get("check_in"):
+                            try:
+                                check_in_str = s["check_in"]
+                                if check_in_str.endswith('Z'):
+                                    check_in_str = check_in_str.replace('Z', '+00:00')
+                                check_in_dt = datetime.fromisoformat(check_in_str)
+                                now = datetime.now(timezone.utc)
+                                if check_in_dt.tzinfo is None:
+                                    check_in_dt = check_in_dt.replace(tzinfo=timezone.utc)
+                                duration_seconds = (now - check_in_dt).total_seconds()
+                                sess_hours = round(max(0, duration_seconds / 3600.0), 2)
+                            except Exception as e:
+                                print(f"Error calculating real-time duration in daily report: {e}")
+                                sess_hours = 0
+                        total_work_hours += sess_hours
+                    
                     perm_h = sessions[0].get("permission_hours", 0)
                     
                     # Collect all unique locations
@@ -164,7 +198,7 @@ class AdminService:
                         "status": "active" if any(s.get("status") == "active" for s in sessions) else "completed",
                         "timestamp": sessions[0].get("timestamp"),
                         "total_hours": total_work_hours,
-                        "formatted_duration": f"{total_work_hours:.2f} hrs",
+                        "formatted_duration": format_duration(total_work_hours),
                         "permission_hours": perm_h,
                         "day_total_hours": total_work_hours + perm_h,
                         "location": loc_str,
@@ -222,15 +256,28 @@ class AdminService:
                 sorted_records = sorted(records, key=lambda x: x["check_in"] or "", reverse=True)
                 latest_check_in = sorted_records[0]["check_in"] if sorted_records else None
 
-            # 4. Absent days (Assuming working days = elapsed days in month)
-            # This is complex to do accurately without a holiday calendar, 
-            # so we'll return the present count and let FE handle the 'absent' display logic 
-            # if it prefers the "Days elapsed - Present" math.
-            
+            # 4. Absent days (Mon-Sat gaps)
+            absent_count = 0
+            try:
+                d1 = datetime.fromisoformat(date_from).date()
+                d2 = datetime.fromisoformat(date_to).date()
+                # Cap at today
+                today_dt = date.today()
+                if d2 > today_dt: d2 = today_dt
+                
+                total_days_count = (d2 - d1).days + 1
+                if total_days_count > 0:
+                    all_dates = [d1 + timedelta(days=i) for i in range(total_days_count)]
+                    working_dates = [d.isoformat() for d in all_dates if d.weekday() < 6]
+                    absent_count = sum(1 for d_str in working_dates if d_str not in present_dates)
+            except Exception as e:
+                print(f"Error calculating employee absences: {e}")
+
             return {
                 "success": True,
                 "stats": {
                     "present_days": present_days,
+                    "absent_days": absent_count,
                     "office_hours": round(office_hours, 2),
                     "field_hours": round(field_hours, 2),
                     "total_hours": round(office_hours + field_hours, 2),
@@ -308,9 +355,27 @@ class AdminService:
                 emp = emp_map.get(r["employee_id"])
                 if not emp: continue # Skip if Founder/Boss (filtered out in emp_map)
                 
-                # Format duration
-                hours = float(r.get("total_hours", 0))
-                formatted_duration = f"{hours:.2f} hrs" if hours > 0 else "--"
+                # Format duration - calculate in real-time for active sessions
+                db_hours = float(r.get("total_hours", 0) or 0)
+                
+                # If session is still active (no check_out), calculate real-time duration
+                if r.get("check_out") is None and r.get("check_in"):
+                    try:
+                        check_in_str = r["check_in"]
+                        if check_in_str.endswith('Z'):
+                            check_in_str = check_in_str.replace('Z', '+00:00')
+                        check_in_dt = datetime.fromisoformat(check_in_str)
+                        now = datetime.now(timezone.utc)
+                        if check_in_dt.tzinfo is None:
+                            check_in_dt = check_in_dt.replace(tzinfo=timezone.utc)
+                        duration_seconds = (now - check_in_dt).total_seconds()
+                        db_hours = round(max(0, duration_seconds / 3600.0), 2)
+                    except Exception as e:
+                        print(f"Error calculating real-time duration: {e}")
+                        db_hours = 0
+                
+                hours = db_hours
+                formatted_duration = format_duration(hours) if hours > 0 else "--"
                 
                 record = {
                     "id": r["id"],
@@ -327,9 +392,11 @@ class AdminService:
                     "attendance_status": "Present",
                     "total_hours": hours,
                     "formatted_duration": formatted_duration,
-                    "entry_location_display": r.get("entry_address", "Office"),
-                    "exit_location_display": r.get("exit_address", "Office") if r.get("check_out") else "--",
-                    "location_name": r.get("entry_address", "Office"),
+                    "entry_location_display": r.get("entry_address") or r.get("address") or "Office",
+                    "exit_location_display": (r.get("exit_address") or r.get("address") or "Office") if r.get("check_out") else "--",
+                    "location_name": r.get("entry_address") or r.get("address") or "Office",
+                    "entry_address": r.get("entry_address") or r.get("address") or "Office",
+                    "exit_address": r.get("exit_address") or r.get("address") or "--",
                     "is_spoof": False,
                     "permission_hours": 0,
                     "is_field_work": r.get("attendance_type") == "Field"
@@ -419,8 +486,9 @@ class AdminService:
             field_mapping = {
                 "full_name": "full_name",
                 "name": "full_name",
+                "username": "username",
                 "designation": "designation",
-                "department": "designation", # Map department to designation as per current schema
+                "department": "department", # Fixed: Map department to department
                 "email": "email",
                 "mobile_number": "mobile_number",
                 "phone": "mobile_number",
@@ -474,5 +542,125 @@ class AdminService:
         except Exception as e:
              print(f"Error deleting employee: {e}")
              return {"success": False, "message": str(e)}
+
+    async def get_aggregated_report(self, date_from: str, date_to: str, employee_id: Optional[str] = None, attendance_type: Optional[str] = None) -> Dict[str, Any]:
+        """Get daily aggregated report for a date range"""
+        try:
+            # 0. Lazy Auto-Logout: Close stale sessions from previous days
+            from services.attendance_service import attendance_service
+            attendance_service.close_stale_sessions()
+
+            # 1. Fetch employees (Exclude Founder/Boss)
+            if employee_id:
+                emp_res = self.supabase.table("employees").select("employee_id, full_name, department, designation").eq("employee_id", employee_id).execute()
+            else:
+                emp_res = self.supabase.table("employees").select("employee_id, full_name, department, designation").execute()
+            
+            def is_founder(d):
+                d_low = str(d or "").lower()
+                return "founder" in d_low or "boss" in d_low
+
+            all_employees = [e for e in (emp_res.data or []) if not is_founder(e.get("designation"))]
+            emp_map = {e["employee_id"]: e for e in all_employees}
+            
+            # 2. Fetch all raw records in the range
+            records_res = await self.get_attendance_records(date_from=date_from, date_to=date_to, employee_id=employee_id, limit=5000, emp_map=emp_map)
+            all_sessions = records_res.get("records", [])
+            
+            # 3. Aggregate by (employee_id, date)
+            agg = {} # key: (eid, date_str)
+            for s in all_sessions:
+                eid = s["employee_id"]
+                d_str = s["check_in"].split("T")[0]
+                key = (eid, d_str)
+                
+                if key not in agg:
+                    agg[key] = {
+                        "employee_id": eid,
+                        "full_name": s["full_name"],
+                        "date": d_str,
+                        "attendance_type": s.get("is_field_work", False), # Temporary booleans to be processed later
+                        "first_login": s["check_in"],
+                        "last_login": s["check_out"],
+                        "total_hours": 0,
+                        "types": set(),
+                        "is_active": False,
+                        "sessions": [] # For drill-down if needed
+                    }
+                
+                # Track types
+                agg[key]["types"].add("Field" if s.get("is_field_work") else "Office")
+                
+                # Update first login
+                if s["check_in"] < agg[key]["first_login"]:
+                    agg[key]["first_login"] = s["check_in"]
+                
+                # Update last login
+                if s["check_out"]:
+                    if not agg[key]["last_login"] or s["check_out"] > agg[key]["last_login"]:
+                        agg[key]["last_login"] = s["check_out"]
+                else:
+                    agg[key]["is_active"] = True
+                
+                agg[key]["total_hours"] += s.get("total_hours", 0)
+                agg[key]["sessions"].append(s)
+
+            # 4. Prepare final data
+            report_data = []
+            for key, val in agg.items():
+                val["attendance_type"] = "Field" if "Field" in val["types"] and len(val["types"]) == 1 else \
+                                       "Office" if "Office" in val["types"] and len(val["types"]) == 1 else \
+                                       "Hybrid" if len(val["types"]) > 1 else "Office"
+                
+                val["formatted_duration"] = format_duration(val["total_hours"])
+                # Clean up set for JSON serialization
+                del val["types"]
+                report_data.append(val)
+            
+            # 4.5 Filter by attendance type if requested
+            if attendance_type and attendance_type.lower() != "all":
+                report_data = [r for r in report_data if r["attendance_type"].lower() == attendance_type.lower()]
+            
+            # Sort: Date Desc, Name Asc
+            report_data.sort(key=lambda x: (x["date"], x["full_name"]), reverse=True)
+            
+            # 5. Calculate Summary (Present/Absent)
+            # If a range is given, we count present days. 
+            # Absent calculation depends on the context (per employee vs total).
+            present_dates = set(val["date"] for val in report_data)
+            
+            # If filtered by employee, we can calculate actual absent days
+            absent_count = 0
+            if employee_id and date_from and date_to:
+                try:
+                    d1 = datetime.fromisoformat(date_from.split('T')[0]).date()
+                    d2 = datetime.fromisoformat(date_to.split('T')[0]).date()
+                    # Cap at today to avoid future absences
+                    today_dt = date.today()
+                    if d2 > today_dt: d2 = today_dt
+                    
+                    total_days_count = (d2 - d1).days + 1
+                    if total_days_count > 0:
+                        all_dates = [d1 + timedelta(days=i) for i in range(total_days_count)]
+                        # Only count Mon-Sat (weekday 0-5) as potential work days
+                        working_dates = [d.isoformat() for d in all_dates if d.weekday() < 6]
+                        
+                        # Absences = working dates in period where employee was not present
+                        absent_count = sum(1 for d_str in working_dates if d_str not in present_dates)
+                except Exception as e:
+                    print(f"Error calculating Sunday-less absences: {e}")
+                    pass
+
+            return {
+                "success": True,
+                "records": report_data,
+                "summary": {
+                    "total_present": len(report_data) if not employee_id else len(present_dates),
+                    "total_absent": absent_count if employee_id else 0 # Only show absent count for single employee filter
+                }
+            }
+        except Exception as e:
+            print(f"Error in get_aggregated_report: {e}")
+            return {"success": False, "message": str(e), "records": []}
 
 admin_service = AdminService()

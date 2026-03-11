@@ -3,6 +3,7 @@ import { useRef, useState, useEffect, forwardRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Mail,
+  User,
   Lock,
   Eye,
   EyeOff,
@@ -193,7 +194,8 @@ export default function Login() {
       // Looks like a UUID
       query = query.eq("id", uid);
     } else if (uid) {
-      query = query.eq("employee_id", uid);
+      // Check both employee_id and username
+      query = query.or(`employee_id.eq.${uid},username.eq.${uid}`);
     } else {
       query = query.eq("email", mail);
     }
@@ -240,11 +242,11 @@ export default function Login() {
     try {
       const code = String(idOrCode).trim();
 
-      // 1. Try employees table by employee_id string (most common, e.g. F0001)
+      // 1. Try employees table by employee_id or username
       const { data: empData } = await supabase
         .from("employees")
         .select("designation")
-        .eq("employee_id", code)
+        .or(`employee_id.eq.${code},username.eq.${code}`)
         .maybeSingle();
 
       if (empData?.designation) return empData.designation;
@@ -287,7 +289,7 @@ export default function Login() {
 
 
 
-  // ✅ Don’t break app login if bridge fails; only log a warning.
+  // ✅ Don't break app login if bridge fails; only log a warning.
   const tryEnsureSupabaseForDocs = async (params, roleLabelForError = "") => {
     try {
       persistDocsAuth(params);
@@ -327,294 +329,148 @@ export default function Login() {
     try {
       setLoading(true);
 
-      // --- 1. Try FOUNDER/MANAGER Login ---
-      let managerData = null;
-
-      try {
-        const m = await rpcManagerLogin({ p_email: email, p_password: password });
-        const access = String(m.access || m.role || "viewer").toLowerCase();
-        const empId = m.manager_code || m.id || "MGR";
-        const emailPrefix = email.split("@")[0].toUpperCase();
-
-        // Look up employees table by EMAIL (case-insensitive) or by ID prefix (e.g. F0001)
-        const { data: empByEmailMgr } = await supabase
-          .from("employees")
-          .select("employee_id, designation")
-          .or(`email.ilike.${email},employee_id.eq.${emailPrefix}`)
-          .maybeSingle();
-
-        // Use manager_code for DB lookup (string like F0001), not UUID
-        const designationLookupId = empByEmailMgr?.employee_id || m.manager_code || empId;
-
-        // Parallelize fetching designation and checking profile
-        const [dbDesignationRaw, profileExistsRaw] = await Promise.all([
-          fetchUserDesignation(designationLookupId),
-          appProfileExists(empId, email)
-        ]);
-
-        const dbDesignation = (empByEmailMgr?.designation || dbDesignationRaw || m.designation || "").toLowerCase();
-        const idLower = String(empByEmailMgr?.employee_id || m.manager_code || empId || "").toLowerCase();
-        const mailLower = String(email || m.email || "").toLowerCase();
-        const mRoleLower = String(m.role || "").toLowerCase();
-
-        const isFnd = dbDesignation.includes("founder") ||
-          dbDesignation.includes("boss") ||
-          mailLower.includes("founder") ||
-          mailLower.startsWith("founder") ||
-          idLower === "founder" ||
-          idLower.startsWith("fnd") ||
-          idLower.startsWith("f0") ||
-          mRoleLower === "founder" ||
-          mRoleLower === "boss";
-
-        console.log("[Login] Manager/Founder detection:", {
-          empId, designationLookupId, empByEmailMgr, dbDesignation,
-          mRole: m.role, mailLower, idLower, isFnd
-        });
-        const isManagerOrFnd = isFnd ||
-          dbDesignation.includes("manager") ||
-          dbDesignation.includes("hr") ||
-          mRoleLower === "manager" ||
-          mRoleLower === "hr" ||
-          mRoleLower === "admin";
-
-        if (isManagerOrFnd) {
-          managerData = {
-            id: empId,
-            name: m.full_name || "Manager",
-            full_name: m.full_name || "Manager",
-            email: m.email,
-            role: isFnd ? "founder" : "manager",
-            access,
-            team: m.team || "Team",
-            designation: dbDesignation || m.designation || "Manager",
-            route: isFnd ? "/founder-dashboard" : "/manager-dashboard",
-            bypassProfile: m.bypassProfile || profileExistsRaw
-          };
-        } else {
-          console.debug("rpcManagerLogin returned non-manager user, skipping to next block.");
-        }
-      } catch (e) {
-        console.debug("Not a manager:", e.message);
-      }
-
-      if (managerData) {
-        const sessionPayload = { ...managerData, loginRole: managerData.role };
-        localStorage.setItem("HRMSS_AUTH_SESSION", JSON.stringify(sessionPayload));
-        localStorage.setItem(MANAGER_SESSION_KEY, JSON.stringify(managerData));
-
-        await tryEnsureSupabaseForDocs({
-          role: "manager",
-          identifier: email,
-          password: password,
-          preferredEmail: email,
-        }, "manager");
-
-        const completed = managerData.bypassProfile || isCompleted("manager");
-        // Redirection to sign-in disabled as per user request
-        const targetPath = managerData.role === "founder" ? "/founder-dashboard" : "/manager-dashboard";
-        navigate(targetPath, { replace: true });
-        return;
-      }
-
-      // --- 2. Try HR Login ---
-      try {
-        const session = await rpcVerifyApp({
-          p_role: "hr",
+      // ---- Helper: Call verify_login_json / manager_login_js via RPC ----
+      const tryRpcLogin = async () => {
+        const { data, error } = await supabase.rpc("verify_login_json", {
+          p_role: null,
           p_identifier: email,
           p_admin_id: null,
           p_secret: password,
         });
+        if (error) throw new Error(error.message || "Login failed");
+        if (!data || data.error) throw new Error(data?.error || "Invalid credentials");
+        return data;
+      };
 
-        const userId = session?.user_id || session?.id || session?.userId || null;
-        const emailPrefix = email.split("@")[0].toUpperCase();
+      // Call login once and route based on designation
+      const session = await tryRpcLogin();
 
-        // Look up employees table by EMAIL (case-insensitive) or by ID prefix (e.g. F0001)
-        const { data: empByEmail } = await supabase
-          .from("employees")
-          .select("employee_id, designation, full_name")
-          .or(`email.ilike.${email},employee_id.eq.${emailPrefix}`)
-          .maybeSingle();
-
-        const hrEmpId = empByEmail?.employee_id || session?.employee_id || userId;
-        const empDesignation = (empByEmail?.designation || session?.designation || "").toLowerCase();
-
-        // Fetch display name for the session
-        const hrNameData = empByEmail || { full_name: session?.full_name || session?.name || "" };
-
-        // Parallelize profile check 
-        const profileExistsRaw = userId ? await appProfileExists(userId, email) : false;
-
-        const dbDesignation = (empDesignation || "HR").trim().toLowerCase();
-
-        const idLower = String(hrEmpId || userId || "").toLowerCase();
-        const mailLower = String(email || "").toLowerCase();
-        const sRoleLower = String(session?.role || "").toLowerCase();
-
-        console.log("[Login] HR/Founder detection:", {
-          hrEmpId, empByEmail, dbDesignation, sRoleLower, idLower, mailLower
-        });
-
-        const isFounder = dbDesignation.includes("founder") ||
-          dbDesignation.includes("boss") ||
-          mailLower.includes("founder") ||
-          mailLower.startsWith("founder") ||
-          idLower === "founder" ||
-          idLower.startsWith("fnd") ||
-          idLower.startsWith("f0") ||
-          sRoleLower === "founder" ||
-          sRoleLower === "boss";
-
-        const isHRorFnd = isFounder ||
-          dbDesignation.includes("hr") ||
-          dbDesignation.includes("admin") ||
-          sRoleLower === "hr" ||
-          sRoleLower === "admin";
-
-        if (!isHRorFnd) {
-          console.debug("rpcVerifyApp(hr) returned non-HR user, falling through.");
-          throw new Error("Not an HR user");
-        }
-
-        const targetPath = isFounder ? "/founder-dashboard" : "/hr-dashboard";
-        const targetRole = isFounder ? "founder" : "hr";
-
-        const sessionPayload = {
-          ...session,
-          role: targetRole,
-          full_name: hrNameData?.full_name || session?.full_name || session?.name || "",
-          name: hrNameData?.full_name || session?.full_name || session?.name || "",
-          loginRole: targetRole,
-          designation: dbDesignation,
-          employee_id: hrEmpId,
-        };
-        localStorage.setItem("HRMSS_AUTH_SESSION", JSON.stringify(sessionPayload));
-
-        await tryEnsureSupabaseForDocs({
-          role: targetRole,
-          identifier: email,
-          password: password,
-          preferredEmail: email,
-        }, targetRole);
-
-        // Redirection to sign-in disabled as per user request
-        localStorage.setItem(COMPLETION_KEY(targetRole), "true");
-        if (isFounder) localStorage.setItem(COMPLETION_KEY("founder"), "true");
-        await new Promise(r => setTimeout(r, 100));
-        navigate(targetPath, { replace: true });
-        return;
-      } catch (e) {
-        console.debug("Not an HR:", e.message);
-      }
-
-      // --- 3. Try EMPLOYEE Login ---
+      const empId = session.employee_id;
+      const fullName = session.full_name || "";
+      
+      // Fetch designation from employees table
+      let designation = "";
       try {
-        const session = await rpcVerifyApp({
-          p_role: "employee",
-          p_identifier: email,
-          p_admin_id: null,
-          p_secret: password,
-        });
-
-        const isHariPriya = email.toLowerCase() === "haripriya@vijayshipping.com";
-        const empId = session?.employee_id || session?.id || session?.user_id || null;
-
-        // Fetch display name for the session
-        const { data: nameData } = await supabase
+        const { data: empData, error: empError } = await supabase
           .from("employees")
-          .select("full_name")
+          .select("designation")
           .eq("employee_id", empId)
           .maybeSingle();
-
-        // Parallelize fetching designation and checking profile
-        const [dbDesignationRaw, completed] = await Promise.all([
-          fetchUserDesignation(empId),
-          employeeProfileCompleted(empId, email)
-        ]);
-
-        // Fetch fresh designation for the session from employees table
-        const userDesignation = (dbDesignationRaw || session?.designation || "").trim().toLowerCase();
-
-        // Aggressive Founder detection: check designation, email, and ID prefix
-        const idLower = String(empId || "").toLowerCase();
-        const mailLower = String(email || "").toLowerCase();
-
-        const isFounder = userDesignation.includes("founder") ||
-          userDesignation.includes("boss") ||
-          mailLower.includes("founder") ||
-          mailLower.startsWith("founder") ||
-          idLower === "founder" ||
-          idLower.startsWith("fnd");
-
-        const isFnd = isFounder;
-        const isMgr = userDesignation.includes("manager") && !isFnd;
-        const isHR = (userDesignation.includes("hr") || userDesignation.includes("admin") || isHariPriya) && !isFnd && !isMgr;
-
-        let targetRole = "employee";
-        let targetPath = "/employee-dashboard";
-
-        if (isFnd) {
-          targetRole = "founder";
-          targetPath = "/founder-dashboard";
-        } else if (isMgr) {
-          targetRole = "manager";
-          targetPath = "/manager-dashboard";
-        } else if (isHR) {
-          targetRole = "hr";
-          targetPath = "/hr-dashboard";
+        
+        if (empError) {
+          console.warn("[Login] Error fetching designation:", empError.message);
         }
-
-        // Management roles are considered profile-completed for the dashboard entry
-        const isManagementPath = targetRole === "hr" || targetRole === "admin" || targetRole === "manager" || isFnd;
-        const finalCompleted = completed || isManagementPath;
-
-        const sessionPayload = {
-          ...session,
-          full_name: nameData?.full_name || session?.full_name || session?.name || "",
-          name: nameData?.full_name || session?.full_name || session?.name || "",
-          loginRole: targetRole,
-          role: targetRole,
-          designation: userDesignation
-        };
-        localStorage.setItem("HRMSS_AUTH_SESSION", JSON.stringify(sessionPayload));
-
-        // Mark roles as completed to avoid redirection loops in layouts
-        localStorage.setItem(COMPLETION_KEY("employee"), finalCompleted ? "true" : "false");
-        if (targetRole !== "employee") {
-          localStorage.setItem(COMPLETION_KEY(targetRole), finalCompleted ? "true" : "false");
+        
+        if (empData?.designation) {
+          designation = empData.designation;
+          console.log("[Login] Got designation from employees table:", designation);
         }
-        if (isFnd) {
-          localStorage.setItem(COMPLETION_KEY("founder"), finalCompleted ? "true" : "false");
-        }
-        if (isMgr || isHR) {
-          localStorage.setItem(COMPLETION_KEY("manager"), finalCompleted ? "true" : "false");
-          localStorage.setItem(COMPLETION_KEY("hr"), finalCompleted ? "true" : "false");
-        }
-
-        await new Promise(r => setTimeout(r, 100));
-
-        // Redirection to sign-in disabled as per user request
-        navigate(targetPath, { replace: true });
-        /*
-        if (!finalCompleted) {
-          navigate("/sign-in", {
-            replace: true,
-            state: {
-              role: targetRole,
-              empId: empId || "",
-              redirectTo: targetPath
-            }
-          });
-        } else {
-          navigate(targetPath, { replace: true });
-        }
-        */
-        return;
       } catch (e) {
-        console.debug("Not an employee:", e.message);
+        console.warn("[Login] Failed to fetch designation from employees table:", e.message);
+      }
+      
+      // Fallback to session designation if not found in employees table
+      if (!designation && session.designation) {
+        designation = session.designation;
+      }
+      
+      // Ensure it's a string and handle null/undefined
+      if (designation === null || designation === undefined) {
+        designation = "";
+      }
+      designation = String(designation).toLowerCase().trim();
+
+      console.log("[Login] Employee ID:", empId, "Designation:", designation);
+
+      // ---- Determine Role from Designation ----
+      // Priority order: Employee -> Founder -> HR -> Manager -> Default Employee
+      // Use simple includes() for flexibility
+      
+      let targetRole = "employee";
+      let targetPath = "/employee-dashboard";
+      
+      // Check for Employee first (most common - exclude this from other roles)
+      const isEmployeeRole = 
+        designation === "employee" || 
+        designation.includes("employee");
+      
+      // Check for Founder
+      const isFounder = 
+        designation.includes("founder") || 
+        designation.includes("boss") ||
+        designation.includes("ceo") ||
+        designation.includes("owner");
+      
+      // Check for HR
+      const isHR = 
+        designation.includes("hr") ||
+        designation.includes("human resource") ||
+        designation.includes("admin");
+      
+      // Check for Manager — also use session.role from RPC as fallback
+      // This handles cases where designation is empty but RPC returns role="manager"
+      const sessionRoleLower = String(session.role || session.loginRole || "").toLowerCase();
+      const isManager =
+        designation.includes("manager") ||
+        sessionRoleLower === "manager" ||
+        sessionRoleLower.includes("manager");
+
+      // Assign target role based on detected role
+      if (isEmployeeRole && !isFounder) {
+        // Employee but NOT founder - make sure "employee manager" goes to employee
+        targetRole = "employee";
+        targetPath = "/employee-dashboard";
+      } else if (isFounder) {
+        targetRole = "founder";
+        targetPath = "/founder-dashboard";
+      } else if (isHR && !isEmployeeRole) {
+        targetRole = "hr";
+        targetPath = "/hr-dashboard";
+      } else if (isManager && !isEmployeeRole) {
+        targetRole = "manager";
+        targetPath = "/manager-dashboard";
+      } else {
+        // Default to employee if no match found
+        targetRole = "employee";
+        targetPath = "/employee-dashboard";
       }
 
-      throw new Error("Invalid email or password");
+      console.log("[Login] Target Role:", targetRole, "Target Path:", targetPath);
+
+      // ---- Build Session Payload ----
+      const sessionPayload = {
+        employee_id: empId,
+        id: empId,
+        full_name: fullName,
+        name: fullName,
+        email: email,
+        designation: designation,
+        role: targetRole,
+        loginRole: targetRole,
+        access: targetRole,
+      };
+
+      localStorage.setItem("HRMSS_AUTH_SESSION", JSON.stringify(sessionPayload));
+
+      // For manager/founder: also set MANAGER_SESSION_KEY
+      if (isFounder || isManager) {
+        localStorage.setItem(MANAGER_SESSION_KEY, JSON.stringify(sessionPayload));
+        localStorage.setItem("hrmss.signin.completed.manager", "true");
+      }
+      if (isFounder) {
+        localStorage.setItem("hrmss.signin.completed.founder", "true");
+      }
+      localStorage.setItem("hrmss.signin.completed." + targetRole, "true");
+
+      await tryEnsureSupabaseForDocs({
+        role: targetRole,
+        identifier: email,
+        password: password,
+        preferredEmail: email,
+      }, targetRole);
+
+      navigate(targetPath, { replace: true });
+      return;
 
     } catch (ex) {
       const msg = typeof ex?.message === "string" && ex.message.toLowerCase().includes("invalid")
@@ -647,7 +503,7 @@ export default function Login() {
 
           <div className="text-center">
             <h2 className="text-2xl md:text-3xl font-black text-white leading-tight tracking-tight uppercase drop-shadow-xl">
-              HUMAN RESOURCE <br /> MANAGEMENT SYSTEM
+              ATTENDANCE MANAGEMENT SYSTEM
             </h2>
           </div>
 
@@ -673,10 +529,10 @@ export default function Login() {
                     <div className="space-y-4">
                       <Field
                         ref={emailRef}
-                        icon={Mail}
-                        type="email"
-                        placeholder="Email Address"
-                        autoComplete="email"
+                        icon={User}
+                        type="text"
+                        placeholder="Username"
+                        autoComplete="username"
                         required
                       />
                       <Field
@@ -779,5 +635,4 @@ export default function Login() {
     </div>
   );
 }
-
 

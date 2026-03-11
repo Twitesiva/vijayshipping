@@ -5,6 +5,10 @@ from datetime import datetime
 import numpy as np
 import os
 
+# APScheduler for midnight auto-logout
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+
 from utils.image_utils import base64_to_image
 from services.attendance_service import attendance_service
 from services.anti_spoof import anti_spoof_service
@@ -16,6 +20,48 @@ from models import User
 from services.geofencing import get_address
 
 app = FastAPI(title="HRMS Attendance API")
+
+# Initialize scheduler
+scheduler = BackgroundScheduler()
+
+def scheduled_midnight_auto_logout():
+    """Scheduled task that runs at midnight to auto-logout active sessions"""
+    print("SCHEDULER: Running midnight auto-logout task...")
+    try:
+        result = attendance_service.close_today_active_sessions()
+        print(f"SCHEDULER: {result}")
+    except Exception as e:
+        print(f"SCHEDULER ERROR: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    print("API Starting up... Checking for stale attendance sessions.")
+    try:
+        attendance_service.close_stale_sessions()
+    except Exception as e:
+        print(f"Error in startup auto-logout: {e}")
+    
+    # Start the scheduler for midnight auto-logout
+    try:
+        # Run at midnight (00:00) every day
+        scheduler.add_job(
+            scheduled_midnight_auto_logout,
+            CronTrigger(hour=0, minute=0),
+            id="midnight_auto_logout",
+            name="Midnight Auto-Logout",
+            replace_existing=True
+        )
+        scheduler.start()
+        print("SCHEDULER: Midnight auto-logout job scheduled successfully")
+    except Exception as e:
+        print(f"SCHEDULER ERROR: Failed to start scheduler: {e}")
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Shutdown the scheduler when the app stops"""
+    if scheduler.running:
+        scheduler.shutdown()
+        print("SCHEDULER: Scheduler shutdown successfully")
 
 # Configure CORS
 app.add_middleware(
@@ -190,6 +236,42 @@ async def geocode(lat: float, lng: float):
         address = get_address(lat, lng)
         return {"success": True, "address": address}
     except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@app.get("/api/v1/attendance/check-geofence")
+async def check_geofence(lat: float, lng: float):
+    """
+    Check if user location is within office geofence.
+    Returns is_within_geofence, distance, and office status.
+    Default radius is 500 meters (can be changed via GPS_ACCURACY_THRESHOLD env var).
+    """
+    try:
+        office_lat = float(os.getenv("OFFICE_LAT") or os.getenv("OFFICE_ZONE_LAT", 13.0798))
+        office_lon = float(os.getenv("OFFICE_LON") or os.getenv("OFFICE_ZONE_LNG", 80.2263))
+        radius_meters = float(os.getenv("GPS_ACCURACY_THRESHOLD", 500))
+        radius_km = radius_meters / 1000.0
+        
+        print(f"[GEOFENCE] User location: lat={lat}, lng={lng}")
+        print(f"[GEOFENCE] Office location: lat={office_lat}, lng={office_lon}")
+        print(f"[GEOFENCE] Radius: {radius_meters}m ({radius_km}km)")
+        
+        from services.geofencing import calculate_distance
+        distance_km = calculate_distance(lat, lng, office_lat, office_lon)
+        distance_m = distance_km * 1000  # Convert to meters
+        is_inside = distance_km <= radius_km
+        
+        print(f"[GEOFENCE] Distance: {distance_m}m, Is Inside: {is_inside}")
+        
+        return {
+            "success": True,
+            "is_within_geofence": is_inside,
+            "distance_meters": round(distance_m, 2),
+            "radius_meters": radius_meters,
+            "office_lat": office_lat,
+            "office_lon": office_lon
+        }
+    except Exception as e:
+        print(f"[GEOFENCE] Error: {e}")
         return {"success": False, "message": str(e)}
 
 @app.post("/api/v1/attendance/detect-face")
@@ -368,6 +450,32 @@ async def enroll_face(request: Request):
         print(f"Enrollment Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/api/v1/admin/delete-face-enrollment/{employee_id}")
+async def delete_face_enrollment(employee_id: str):
+    """Deactivate all face enrollments for an employee (manager action)"""
+    try:
+        supabase = get_supabase()
+
+        # Check if there are active enrollments
+        enroll_res = supabase.table("face_enrollments").select("id").eq("employee_id", employee_id).eq("is_active", True).execute()
+        if not enroll_res.data:
+            raise HTTPException(status_code=404, detail=f"No active face enrollment found for employee {employee_id}")
+
+        # Deactivate all enrollments for this employee
+        supabase.table("face_enrollments").update({"is_active": False}).eq("employee_id", employee_id).execute()
+
+        # Force refresh the recognition cache
+        try:
+            attendance_service._refresh_enrollment_cache(force=True)
+        except Exception as cache_err:
+            print(f"Non-critical cache refresh error: {cache_err}")
+
+        return {"success": True, "message": f"Face enrollment deleted for {employee_id}"}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/v1/attendance/status")
 async def get_current_user_status(employee_id: Optional[str] = None):
     """Check current attendance session status for the logged in employee"""
@@ -449,7 +557,7 @@ async def mark_attendance(request: Request):
         
         office_lat = float(os.getenv("OFFICE_ZONE_LAT", 13.0798))
         office_lon = float(os.getenv("OFFICE_ZONE_LNG", 80.2263))
-        radius = float(os.getenv("GPS_ACCURACY_THRESHOLD", 200)) / 1000.0
+        radius = float(os.getenv("GPS_ACCURACY_THRESHOLD", 500)) / 1000.0
         
         success, message, att_info = attendance_service.mark_attendance(
             None, image, lat, lon, office_lat, office_lon, radius, 
@@ -484,7 +592,7 @@ async def mark_attendance_quick(request: Request, background_tasks: BackgroundTa
         
         office_lat = float(os.getenv("OFFICE_ZONE_LAT", 13.0798))
         office_lon = float(os.getenv("OFFICE_ZONE_LNG", 80.2263))
-        radius = float(os.getenv("GPS_ACCURACY_THRESHOLD", 200)) / 1000.0
+        radius = float(os.getenv("GPS_ACCURACY_THRESHOLD", 500)) / 1000.0
         
         # Call mark_attendance with background_tasks for faster response
         success, message, att_info = attendance_service.mark_attendance(
@@ -533,6 +641,15 @@ async def get_summary_report(date_from: str, date_to: str):
 async def get_daily_report(date: str):
     return await admin_service.get_daily_report(date)
 
+@app.get("/api/v1/admin/reports/aggregated")
+async def get_aggregated_report(
+    date_from: str,
+    date_to: str,
+    employee_id: Optional[str] = None,
+    attendance_type: Optional[str] = None
+):
+    return await admin_service.get_aggregated_report(date_from, date_to, employee_id, attendance_type)
+
 @app.get("/api/v1/admin/employees")
 async def get_all_employees():
     return await admin_service.get_all_employees()
@@ -553,3 +670,15 @@ async def delete_employee(employee_id: str):
 @app.delete("/api/v1/admin/attendance/{record_id}")
 async def delete_attendance_record(record_id: str):
     return await admin_service.delete_attendance_record(record_id)
+
+@app.post("/api/v1/attendance/auto-logout")
+async def trigger_auto_logout():
+    """
+    Manually trigger the midnight auto-logout process.
+    This endpoint allows testing the auto-logout functionality.
+    """
+    try:
+        result = attendance_service.close_today_active_sessions()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

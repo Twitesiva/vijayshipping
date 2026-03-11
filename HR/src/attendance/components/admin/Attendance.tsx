@@ -38,7 +38,7 @@ export default function Attendance() {
     const [records, setRecords] = React.useState<AttendanceRecord[]>([]);
     const [totalRecords, setTotalRecords] = React.useState(0);
     const [currentPage, setCurrentPage] = React.useState(0);
-    const [recordsPerPage] = React.useState(10);
+    const [recordsPerPage] = React.useState(6);
     const [alert, setAlert] = React.useState<AlertState>({ open: false, message: '', severity: 'info' });
 
     const [filters, setFilters] = React.useState({
@@ -182,18 +182,36 @@ export default function Attendance() {
     };
 
     const formatDurationFromHours = (totalHours?: number) => {
-        return (totalHours || 0).toFixed(2) + ' hrs';
+        if (!totalHours || totalHours <= 0) return '--';
+        const hrs = Math.floor(totalHours);
+        const mins = Math.round((totalHours - hrs) * 60);
+        if (mins === 0) {
+            return `${hrs} hr`;
+        } else if (hrs === 0) {
+            return `${mins} min`;
+        } else {
+            return `${hrs} hr ${mins} min`;
+        }
     };
 
     const formatDurationFromTimes = (entryTime?: string, exitTime?: string) => {
-        if (!entryTime || !exitTime) return '-';
+        if (!entryTime || !exitTime) return '--';
         try {
             const entry = new Date(entryTime);
             const exit = new Date(exitTime);
             const diffMs = exit.getTime() - entry.getTime();
             const diffHrs = diffMs / (1000 * 60 * 60);
-            return diffHrs.toFixed(2) + ' hrs';
-        } catch (e) { return '-'; }
+            if (diffHrs <= 0) return '--';
+            const hrs = Math.floor(diffHrs);
+            const mins = Math.round((diffHrs - hrs) * 60);
+            if (mins === 0) {
+                return `${hrs} hr`;
+            } else if (hrs === 0) {
+                return `${mins} min`;
+            } else {
+                return `${hrs} hr ${mins} min`;
+            }
+        } catch (e) { return '--'; }
     };
 
     const markExit = async (recordId: string) => {
@@ -239,8 +257,10 @@ export default function Attendance() {
                             <Grid item xs={12} md={3}>
                                 <TextField
                                     select
+                                    variant="outlined"
                                     label="Staff Member"
                                     fullWidth
+                                    InputLabelProps={{ shrink: true }}
                                     value={filters.employee_id}
                                     onChange={e => updateFilter('employee_id', e.target.value)}
                                     sx={{ '& .MuiOutlinedInput-root': { borderRadius: '14px', bgcolor: 'background.paper' } }}
@@ -252,8 +272,10 @@ export default function Attendance() {
                             <Grid item xs={12} md={2}>
                                 <TextField
                                     select
+                                    variant="outlined"
                                     label="Designation"
                                     fullWidth
+                                    InputLabelProps={{ shrink: true }}
                                     value={filters.designation}
                                     onChange={e => updateFilter('designation', e.target.value)}
                                     sx={{ '& .MuiOutlinedInput-root': { borderRadius: '14px', bgcolor: 'background.paper' } }}
@@ -291,8 +313,10 @@ export default function Attendance() {
                             <Grid item xs={12} md={2}>
                                 <TextField
                                     select
+                                    variant="outlined"
                                     label="Location"
                                     fullWidth
+                                    InputLabelProps={{ shrink: true }}
                                     value={filters.location}
                                     onChange={e => updateFilter('location', e.target.value)}
                                     sx={{ '& .MuiOutlinedInput-root': { borderRadius: '14px', bgcolor: 'background.paper' } }}
@@ -399,3 +423,4 @@ export default function Attendance() {
         </Stack>
     );
 }
+

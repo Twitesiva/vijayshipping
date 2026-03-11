@@ -50,7 +50,7 @@ const formatJoinDate = (value) => {
   return formatDDMMYYYY(raw);
 };
 
-const generateEmployeeId = (list, prefix = "T") => {
+const generateEmployeeId = (list, prefix = "VS") => {
   const numbers = (list || [])
     .filter((emp) => {
       const id = String(emp?.id || "");
@@ -127,18 +127,20 @@ export default function Employees() {
   const [employeeTypeFilter, setEmployeeTypeFilter] = useState("All");
 
   const [newEmployee, setNewEmployee] = useState({
+    username: "",
     email: "",
     password: "",
     fullName: "",
-    idSeries: "T",
+    idSeries: "VS",
     employeeId: "",
     department: "",
     joinDate: "",
   });
 
   const [resignedEmployee, setResignedEmployee] = useState({
+    username: "",
     fullName: "",
-    idSeries: "T",
+    idSeries: "VS",
     employeeId: "",
     email: "",
     joinDate: "",
@@ -262,21 +264,30 @@ export default function Employees() {
   useEffect(() => {
     fetchMetadata();
     const fetchEmployees = async () => {
-      if (!isSupabaseConfigured) return;
+      if (!isSupabaseConfigured) {
+        console.warn("[Employees] Supabase not configured");
+        return;
+      }
 
       try {
+        console.log("[Employees] Fetching employees from database...");
+        
         const { data, error } = await supabase
           .from("employees")
-          .select("employee_id, full_name, email, phone, designation, department, join_date, location, gender, status, avatar, work_status, exit_date, reason_for_leave, document_url")
-          .not("designation", "ilike", "%founder%")
-          .not("designation", "ilike", "%boss%")
-          .order("created_at", { ascending: false });
+          .select("employee_id, username, full_name, email, phone, designation, department, join_date, location, gender, status, avatar, work_status, exit_date, reason_for_leave")
+.order("employee_id", { ascending: true });
 
-        if (error) throw error;
+        if (error) {
+          console.error("[Employees] Fetch error:", error);
+          throw error;
+        }
+
+        console.log("[Employees] Raw data received:", data?.length || 0, "records");
 
         if (Array.isArray(data) && data.length > 0) {
           const mapped = data.map((r) => ({
             id: r.employee_id || "",
+            username: r.username || "",
             name: r.full_name || "",
             designation: r.designation || "",
             department: r.department || "",
@@ -296,10 +307,22 @@ export default function Employees() {
             reasonForLeave: r.reason_for_leave || "",
             documentUrl: r.document_url || "",
           }));
-          setEmployees(mapped);
+          
+          // Filter out founders in JavaScript instead of SQL
+          const filtered = mapped.filter(emp => {
+            const desig = (emp.designation || "").toLowerCase();
+            return !desig.includes("founder") && !desig.includes("boss");
+          });
+          
+          console.log("[Employees] Mapped and filtered:", filtered.length, "employees");
+          setEmployees(filtered);
+        } else {
+          console.log("[Employees] No employees found in database");
+          setEmployees([]);
         }
       } catch (err) {
         console.error("Fetch employees failed:", err);
+        setEmployees([]);
       }
     };
 
@@ -309,9 +332,26 @@ export default function Employees() {
   /* 📈 DYNAMIC DROPDOWN OPTIONS */
   const allDesignations = useMemo(() => {
     const fromEmployees = employees.map((e) => e.designation).filter(Boolean);
-    return [...new Set([...DEPARTMENTS, ...fromEmployees])]
+    
+    // Combine hardcoded departments with employee designations
+    const all = [...DEPARTMENTS, ...fromEmployees];
+    
+    // Normalize and remove duplicates case-insensitively
+    // Keep the first occurrence (prioritizes hardcoded DEPARTMENTS which have proper casing)
+    const normalizedMap = new Map();
+    for (const d of all) {
+      const normalized = d.trim();
+      if (normalized) {
+        const lower = normalized.toLowerCase();
+        if (!normalizedMap.has(lower)) {
+          normalizedMap.set(lower, normalized);
+        }
+      }
+    }
+    
+    return Array.from(normalizedMap.values())
       .filter((d) => !deletedDesignations.includes(d))
-      .sort();
+      .sort((a, b) => a.localeCompare(b));
   }, [employees, deletedDesignations]);
 
 
@@ -367,6 +407,8 @@ export default function Employees() {
       const { error } = await supabase.rpc("upsert_employee_account", {
         p_employee_id: empId,
         p_password: pw,
+        p_username: selectedEmployee.username || null,
+        p_email: selectedEmployee.email || null,
       });
       if (error) throw error;
       alert(`Password reset successfully for ${selectedEmployee.name || empId}`);
@@ -386,6 +428,8 @@ export default function Employees() {
     return {
       name: emp.name || "",
       id: emp.id || "",
+      username: emp.username || "",
+      designation: emp.designation || "",
       avatar: emp.avatar || "",
       status: emp.status || "",
       work_status: emp.workStatus || "Active",
@@ -426,7 +470,8 @@ export default function Employees() {
 
       const payload = {
         full_name: up.name || null,
-        designation: job.designation || null,
+        username: up.username || null,
+        designation: up.designation || null,
         department: job.department || null,
         location: job.location || null,
         join_date: job.joiningDate || null,
@@ -441,6 +486,8 @@ export default function Employees() {
         exit_date: isMarkingInactive ? (up.exit_date || null) : null,
         reason_for_leave: isMarkingInactive ? (up.reason_for_leave || null) : null,
       };
+
+      console.log("[handleSaveEdit] Saving payload:", payload);
 
       // Use backend API instead of direct Supabase board update
       const API_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
@@ -461,6 +508,7 @@ export default function Employees() {
           return {
             ...emp,
             name: payload.full_name,
+            username: payload.username,
             designation: payload.designation,
             department: payload.department,
             location: payload.location,
@@ -484,6 +532,7 @@ export default function Employees() {
       setSelectedEmployee(prev => ({
         ...prev,
         name: payload.full_name,
+        username: payload.username,
         designation: payload.designation,
         department: payload.department,
         location: payload.location,
@@ -572,6 +621,7 @@ export default function Employees() {
       try {
         const payload = {
           employee_id: employeeId,
+          username: newEmployee.username || null,
           full_name: fullName,
           designation: newEmployee.department || null, // Designation (Job Title)
           department: null, // Department (Team) - could be added if needed
@@ -602,6 +652,8 @@ export default function Employees() {
           {
             p_employee_id: employeeId,
             p_password: String(newEmployee.password || ""),
+            p_username: newEmployee.username || null,
+            p_email: email || null,
           }
         );
         if (credErr) throw credErr;
@@ -609,6 +661,7 @@ export default function Employees() {
         setEmployees((prev) => [
           {
             id: inserted.employee_id,
+            username: inserted.username || "",
             name: inserted.full_name,
             designation: inserted.designation || "",
             department: inserted.department || "",
@@ -659,10 +712,11 @@ export default function Employees() {
     setAddStep("CHOICE");
     setShowPw(false);
     setNewEmployee({
+      username: "",
       email: "",
       password: "",
       fullName: "",
-      idSeries: "T",
+      idSeries: "VS",
       employeeId: "",
       department: "",
       joinDate: "",
@@ -737,6 +791,7 @@ export default function Employees() {
 
         const payload = {
           employee_id: resignedEmployee.employeeId,
+          username: resignedEmployee.username || null,
           full_name: resignedEmployee.fullName.trim(),
           email: resignedEmployee.email || null,
           phone: null,
@@ -785,8 +840,9 @@ export default function Employees() {
         setIsAddModalOpen(false);
         setAddStep("CHOICE");
         setResignedEmployee({
+          username: "",
           fullName: "",
-          idSeries: "T",
+          idSeries: "VS",
           employeeId: "",
           email: "",
           joinDate: "",
@@ -834,6 +890,7 @@ export default function Employees() {
       const matchSearch =
         (emp.name || "").toLowerCase().includes(search.toLowerCase()) ||
         (emp.id || "").toLowerCase().includes(search.toLowerCase()) ||
+        (emp.username || "").toLowerCase().includes(search.toLowerCase()) ||
         (emp.email || "").toLowerCase().includes(search.toLowerCase());
 
       const matchDepartment =
@@ -863,6 +920,7 @@ export default function Employees() {
     const isInactive = String(e.workStatus || "").toLowerCase() === "inactive";
 
     const fields = [
+      { label: "Username", value: e.username },
       { label: "Employee ID", value: e.id },
       { label: "Full Name", value: e.name },
       { label: "Email", value: e.email },
@@ -881,20 +939,19 @@ export default function Employees() {
   }, [selectedEmployee]);
 
   return (
-    <div className="min-h-screen bg-slate-50 px-6 py-6">
+    <div className="min-h-screen bg-slate-50 px-3 sm:px-6 py-4 sm:py-6">
       {/* HEADER */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900">
+          <h1 className="text-xl sm:text-2xl font-semibold text-slate-900">
             Employee Details
           </h1>
-          {/* <p className="text-sm text-slate-500">Manage employee records</p> */}
         </div>
 
-        <div className="flex items-center gap-2 bg-white p-1 rounded-xl border shadow-sm">
+        <div className="flex items-center gap-2 bg-white p-1 rounded-xl border shadow-sm self-start sm:self-auto">
           <button
             onClick={() => setViewTab("active")}
-            className={`px-6 py-2 text-sm font-bold rounded-lg transition-all ${viewTab === "active"
+            className={`px-4 sm:px-6 py-2 text-sm font-bold rounded-lg transition-all ${viewTab === "active"
               ? "bg-[#598791] text-white shadow-md"
               : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
               }`}
@@ -903,7 +960,7 @@ export default function Employees() {
           </button>
           <button
             onClick={() => setViewTab("inactive")}
-            className={`px-6 py-2 text-sm font-bold rounded-lg transition-all ${viewTab === "inactive"
+            className={`px-4 sm:px-6 py-2 text-sm font-bold rounded-lg transition-all ${viewTab === "inactive"
               ? "bg-red-600 text-white shadow-md"
               : "text-slate-500 hover:text-slate-700 hover:bg-slate-50"
               }`}
@@ -917,7 +974,7 @@ export default function Employees() {
             setAddStep("ACTIVE");
             setIsAddModalOpen(true);
           }}
-          className="rounded-lg bg-[#598791] px-4 py-2 text-sm font-medium text-white hover:bg-[#75b0bd]"
+          className="rounded-lg bg-[#598791] px-4 py-2 text-sm font-medium text-white hover:bg-[#75b0bd] self-start sm:self-auto"
         >
           + Add Employee
         </button>
@@ -963,7 +1020,6 @@ export default function Employees() {
                   <th className="px-3 py-2 text-left text-xs font-semibold w-[12%]">Join</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold w-[12%]">Exit</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold w-[18%]">Reason</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold w-[8%]">Doc</th>
                 </>
               )}
             </tr>
@@ -1001,13 +1057,6 @@ export default function Employees() {
                     <td className="px-3 py-2 text-slate-600 text-xs">{formatJoinDate(emp.joinDate) || "-"}</td>
                     <td className="px-3 py-2 text-slate-600 text-xs">{formatJoinDate(emp.exitDate) || "-"}</td>
                     <td className="px-3 py-2 text-slate-600 text-xs truncate">{emp.reasonForLeave || "-"}</td>
-                    <td className="px-3 py-2">
-                      {emp.documentUrl ? (
-                        <span className="text-[10px] text-red-600 font-medium">View</span>
-                      ) : (
-                        <span className="text-[10px] text-slate-400">-</span>
-                      )}
-                    </td>
                   </>
                 )}
               </tr>
@@ -1172,11 +1221,11 @@ export default function Employees() {
       {/* ================= ADD EMPLOYEE MODAL ================= */}
       {
         isAddModalOpen && (
-          <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
             <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl max-h-[90vh] flex flex-col">
               <div className="mb-6 shrink-0 border-b border-slate-100 pb-4">
                 <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xl font-bold text-slate-900">
+                  <h2 className="text-xl font-bold text-slate-900 font-segoe">
                     {addStep === "ACTIVE" ? "Create New Employee" : addStep === "INACTIVE" ? "Add Inactive Employee" : "Add Employee"}
                   </h2>
                   <button
@@ -1249,6 +1298,18 @@ export default function Employees() {
                 >
                   <div className="grid gap-4 md:grid-cols-2 overflow-y-auto pr-2 custom-scrollbar flex-1 py-1">
                     <div className="flex flex-col gap-1">
+                      <label className="text-xs font-semibold text-slate-500 ml-1">Username (Login) *</label>
+                      <input
+                        name="username"
+                        value={newEmployee.username}
+                        onChange={handleChange}
+                        placeholder="e.g. vijay_admin"
+                        className="rounded border px-3 py-2"
+                        required
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1">
                       <label className="text-xs font-semibold text-slate-500 ml-1">ID Series *</label>
                       <select
                         name="idSeries"
@@ -1257,9 +1318,8 @@ export default function Employees() {
                         className="rounded border px-3 py-2 bg-slate-50"
                         required
                       >
-                        <option value="T">T Series (T0001)</option>
-                        <option value="TI">TI Series (TI0001)</option>
-                        <option value="TC">TC Series (TC0001)</option>
+                        <option value="VS">VS Series (VS0001)</option>
+
                       </select>
                     </div>
 
@@ -1393,6 +1453,18 @@ export default function Employees() {
                         required
                       />
                     </div>
+                    <div className="flex flex-col gap-1 md:col-span-2">
+                      <label className="text-xs font-semibold text-slate-500 ml-1">Username (Login) *</label>
+                      <input
+                        name="username"
+                        value={resignedEmployee.username}
+                        onChange={handleResignedChange}
+                        placeholder="Username for login"
+                        className="rounded border px-3 py-2"
+                        required
+                      />
+                    </div>
+
                     <div className="flex flex-col gap-1">
                       <label className="text-xs font-semibold text-slate-500 ml-1">ID Series *</label>
                       <select
@@ -1402,9 +1474,8 @@ export default function Employees() {
                         className="rounded border px-3 py-2 bg-slate-50"
                         required
                       >
-                        <option value="T">T Series (T0001)</option>
-                        <option value="TI">TI Series (TI0001)</option>
-                        <option value="TC">TC Series (TC0001)</option>
+                        <option value="VS">VS Series (V0001)</option>
+
                       </select>
                     </div>
 

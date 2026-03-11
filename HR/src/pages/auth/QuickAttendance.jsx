@@ -3,15 +3,13 @@ import { useNavigate } from "react-router-dom";
 import {
     ArrowLeft,
     Camera,
-    MapPin,
     RotateCw,
-    Bell,
-    UserRound,
-    Menu,
     CheckCircle,
     AlertCircle,
-    Search,
-    Globe
+    Globe,
+    Shield,
+    ShieldAlert,
+    ShieldCheck
 } from "lucide-react";
 import API_BASE_URL from "../../config";
 
@@ -30,6 +28,12 @@ export default function QuickAttendance() {
     const [locationStatus, setLocationStatus] = useState("Detecting location...");
     const [error, setError] = useState("");
     const [workMode, setWorkMode] = useState("Office"); // "Office" or "Field"
+    
+    // Geofence states
+    const [isWithinGeofence, setIsWithinGeofence] = useState(false);
+    const [geofenceDistance, setGeofenceDistance] = useState(null);
+    const [geofenceLoading, setGeofenceLoading] = useState(false);
+    const [geofenceError, setGeofenceError] = useState("");
 
     // Identity states
     const [faceStatus, setFaceStatus] = useState("Camera not started");
@@ -48,18 +52,58 @@ export default function QuickAttendance() {
 
     const [locationWatchId, setLocationWatchId] = useState(null);
 
+    // Check geofence when coordinates change
+    useEffect(() => {
+        if (coordinates && coordinates.latitude && coordinates.longitude) {
+            checkGeofence();
+        }
+    }, [coordinates]);
+
+    const checkGeofence = async () => {
+        if (!coordinates || !coordinates.latitude || !coordinates.longitude) return;
+        
+        setGeofenceLoading(true);
+        setGeofenceError("");
+        
+        try {
+            const url = `${API_BASE_URL}/api/v1/attendance/check-geofence?lat=${coordinates.latitude}&lng=${coordinates.longitude}`;
+            const response = await fetch(url);
+            const result = await response.json();
+            
+            if (result.success) {
+                setIsWithinGeofence(result.is_within_geofence);
+                setGeofenceDistance(result.distance_meters);
+            } else {
+                setGeofenceError(result.message || "Failed to check location");
+            }
+        } catch (err) {
+            console.error("Geofence check error:", err);
+            setGeofenceError("Unable to verify location");
+        } finally {
+            setGeofenceLoading(false);
+        }
+    };
+
+    const handleWorkModeChange = (mode) => {
+        if (mode === "Office" && !isWithinGeofence && geofenceDistance !== null) {
+            setError(`You are outside office zone (${Math.round(geofenceDistance)}m away). Please use Field Work mode.`);
+            return;
+        }
+        setWorkMode(mode);
+        setError("");
+    };
+
     useEffect(() => {
         isMountedRef.current = true;
         initializeLocation();
         return () => {
             isMountedRef.current = false;
-            // Force stop everything on unmount
             stopCamera();
             if (watchIdRef.current !== null) {
                 navigator.geolocation.clearWatch(watchIdRef.current);
             }
         };
-    }, []); // Run only once on mount
+    }, []);
 
     useEffect(() => {
         if (videoRef.current && cameraStream) {
@@ -68,7 +112,6 @@ export default function QuickAttendance() {
     }, [cameraStream, submitted]);
 
     const stopCamera = () => {
-        // 1. Thoroughly stop tracks in ref
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => {
                 track.stop();
@@ -77,13 +120,10 @@ export default function QuickAttendance() {
             streamRef.current = null;
         }
 
-        // 2. Detach from video element
         if (videoRef.current) {
             videoRef.current.srcObject = null;
-            try { videoRef.current.pause(); } catch (e) { }
         }
 
-        // 3. Clear State & Lock
         isStartingRef.current = false;
         setCameraStream(null);
         if (detectionIntervalRef.current) {
@@ -106,12 +146,9 @@ export default function QuickAttendance() {
                 const { latitude, longitude } = position.coords;
                 setCoordinates({ latitude, longitude });
 
-                // Only geocode once or when moved significantly
                 if (locationStatus === "Detecting location..." || locationStatus.includes(",")) {
                     try {
                         const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-                        console.log("[Geocoding] Using API Key:", apiKey ? "Key Found" : "MISSING");
-
                         if (!apiKey) {
                             setLocationStatus("Address Service Unavailable (Missing Key)");
                             return;
@@ -121,18 +158,15 @@ export default function QuickAttendance() {
                             `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${apiKey}`
                         );
                         const data = await response.json();
-                        console.log("[Geocoding] Result Status:", data.status);
 
                         if (data.status === "OK" && data.results?.[0]) {
                             const formattedAddress = data.results[0].formatted_address;
                             setAddress(formattedAddress);
                             setLocationStatus(formattedAddress);
                         } else {
-                            console.error("[Geocoding] Failed:", data.error_message || data.status);
                             setLocationStatus(`Address not found (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`);
                         }
                     } catch (err) {
-                        console.error("[Geocoding] Network/Fetch Error:", err);
                         setLocationStatus(`Location error (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`);
                     }
                 }
@@ -145,18 +179,15 @@ export default function QuickAttendance() {
         watchIdRef.current = watchId;
         setLocationWatchId(watchId);
 
-        // AUTO START CAMERA IMMEDIATELY - Don't wait for GPS
         startCamera();
     };
 
     const startCamera = async () => {
         if (!isMountedRef.current || isStartingRef.current) return;
 
-        // Lock and increment ID
         isStartingRef.current = true;
         const currentId = ++cameraRequestIdRef.current;
 
-        // Defense: Stop any existing stream first
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(t => t.stop());
             streamRef.current = null;
@@ -168,7 +199,6 @@ export default function QuickAttendance() {
                 video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
             });
 
-            // ABORT CHECK: If user left, or another request started, STOP THIS STREAM IMMEDIATELY
             if (!isMountedRef.current || currentId !== cameraRequestIdRef.current) {
                 stream.getTracks().forEach(track => track.stop());
                 return;
@@ -179,7 +209,14 @@ export default function QuickAttendance() {
             setCameraActive(true);
             setFaceStatus("Ready - Click Login/Logout");
             isStartingRef.current = false;
-            // Live scanning loop removed - we now verify only on button click as requested
+            
+            // Auto-detect face immediately after camera starts
+            setTimeout(() => {
+                if (isMountedRef.current && !isDetecting) {
+                    performFaceDetection();
+                }
+            }, 500);
+            
         } catch (err) {
             console.error("Camera fail:", err);
             isStartingRef.current = false;
@@ -200,7 +237,6 @@ export default function QuickAttendance() {
         setIsDetecting(true);
         const context = canvas.getContext("2d");
 
-        // Fixed resolution (640max) for ultra-fast processing
         const targetWidth = 640;
         const targetHeight = (video.videoHeight / video.videoWidth) * targetWidth;
 
@@ -228,7 +264,7 @@ export default function QuickAttendance() {
                 if (!result.is_real) {
                     setIdentifiedUser({ employee_id: "", fullName: "" });
                     setFaceStatus("⚠️ SPOOFING DETECTED");
-                    setError("Warning: Live face not detected. Continuous violations will result in disciplinary action.");
+                    setError("Warning: Live face not detected.");
                     setCanMark(false);
                     return;
                 }
@@ -267,6 +303,11 @@ export default function QuickAttendance() {
     };
 
     const handleMarkAttendance = async (action) => {
+        if (!isWithinGeofence && workMode === "Office" && geofenceDistance !== null) {
+            setError(`You are outside office zone (${Math.round(geofenceDistance)}m away). Please switch to Field Work mode to mark attendance.`);
+            return;
+        }
+        
         if (!coordinates || loading) return;
         setLoading(true);
         setError("");
@@ -277,7 +318,6 @@ export default function QuickAttendance() {
             const video = videoRef.current;
             const context = canvas.getContext("2d");
 
-            // Limit resolution to 640 for fast transfer
             const targetWidth = 640;
             const targetHeight = (video.videoHeight / video.videoWidth) * targetWidth;
             canvas.width = targetWidth;
@@ -286,7 +326,6 @@ export default function QuickAttendance() {
 
             const finalImage = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
 
-            // In Click-to-Verify mode, mark-quick handles identification, antispoof, and record creation
             const response = await fetch(`${API_BASE_URL}/api/v1/attendance/mark-quick`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -295,8 +334,8 @@ export default function QuickAttendance() {
                     latitude: coordinates.latitude,
                     longitude: coordinates.longitude,
                     location_address: address || undefined,
-                    employee_id: undefined, // Let the backend identify from the image
-                    action: action, // 'entry' or 'exit'
+                    employee_id: undefined,
+                    action: action,
                     is_field_work: workMode === "Field"
                 }),
             });
@@ -306,7 +345,14 @@ export default function QuickAttendance() {
                 const empName = result.data?.full_name || "Employee";
                 setSuccessMessage(`${empName} - ${action === 'entry' ? "Login" : "Logout"} successful!`);
                 setSubmitted(true);
-                stopCamera(); // Turn off camera IMMEDIATELY for instant privacy feedback
+                
+                if (action === 'entry') {
+                    setIsLoggedIn(true);
+                } else if (action === 'exit') {
+                    setIsLoggedIn(false);
+                }
+                
+                stopCamera();
 
                 setTimeout(() => {
                     setSubmitted(false);
@@ -325,19 +371,14 @@ export default function QuickAttendance() {
         }
     };
 
-    // Removed early return for submitted state to keep video element in DOM
-
     return (
         <div className="min-h-screen relative flex items-center justify-center font-sans overflow-hidden">
-            {/* Background Layer */}
             <div
                 className="absolute inset-0 bg-cover bg-center bg-no-repeat"
                 style={{ backgroundImage: `url(background.png)` }}
             />
-            {/* Overlay Layer */}
             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
 
-            {/* Success Overlay */}
             {submitted && (
                 <div className="absolute inset-0 z-[100] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
                     <div className="bg-white rounded-3xl shadow-2xl border p-12 max-w-md w-full text-center animate-in zoom-in duration-300">
@@ -354,7 +395,6 @@ export default function QuickAttendance() {
                 </div>
             )}
 
-            {/* Back Button */}
             <button
                 onClick={() => {
                     stopCamera();
@@ -366,10 +406,9 @@ export default function QuickAttendance() {
                 <ArrowLeft size={24} />
             </button>
 
-            {/* Attendance Card Container */}
-            <div className="relative z-10 w-full max-w-2xl px-6 py-12 animate-in fade-in slide-in-from-bottom-5 duration-700">
+            <div className="relative z-10 w-full max-w-2xl px-3 sm:px-6 py-6 sm:py-12 animate-in fade-in slide-in-from-bottom-5 duration-700">
                 <div className="bg-white rounded-[32px] shadow-2xl border-none overflow-hidden">
-                    <div className="p-8 sm:p-10">
+                    <div className="p-5 sm:p-10">
                         <div className="mb-8 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
                             <div>
                                 <h2 className="text-3xl font-black text-gray-900 tracking-tight">My Attendance</h2>
@@ -378,7 +417,6 @@ export default function QuickAttendance() {
                             <img src="/VijayShipping_Logo.png" alt="Vijay Shipping" className="h-10 w-auto" />
                         </div>
 
-                        {/* Video Layer */}
                         <div className="mb-8 relative w-full aspect-video rounded-3xl overflow-hidden border border-gray-100 bg-[#0b1220] shadow-2xl group">
                             {cameraActive ? (
                                 <video
@@ -396,7 +434,6 @@ export default function QuickAttendance() {
                             )}
                             <canvas ref={canvasRef} className="hidden" />
 
-                            {/* Scanning Pulse */}
                             {isDetecting && cameraActive && (
                                 <div className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1 bg-black/40 backdrop-blur-md rounded-full border border-white/10">
                                     <div className="h-2 w-2 bg-red-500 rounded-full animate-pulse" />
@@ -405,7 +442,6 @@ export default function QuickAttendance() {
                             )}
                         </div>
 
-                        {/* Error Handling */}
                         {error && (
                             <div className="mb-8 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-xl flex items-center gap-3 text-red-700 text-sm font-bold animate-in fade-in slide-in-from-left-2">
                                 <AlertCircle size={20} className="shrink-0" />
@@ -413,17 +449,17 @@ export default function QuickAttendance() {
                             </div>
                         )}
 
-                        {/* Work Mode Selector */}
                         <div className="mb-8 p-1 bg-gray-100 rounded-2xl flex items-center shadow-inner">
                             <button
-                                onClick={() => setWorkMode("Office")}
-                                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-xs tracking-wider transition-all ${workMode === "Office" ? "bg-white text-indigo-600 shadow-md scale-[1.02]" : "text-gray-500 hover:text-gray-700"}`}
+                                onClick={() => handleWorkModeChange("Office")}
+                                disabled={!isWithinGeofence && geofenceDistance !== null && workMode !== "Office"}
+                                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-xs tracking-wider transition-all ${workMode === "Office" ? "bg-white text-indigo-600 shadow-md scale-[1.02]" : "text-gray-500 hover:text-gray-700"} ${!isWithinGeofence && geofenceDistance !== null && workMode !== "Office" ? "opacity-50 cursor-not-allowed" : ""}`}
                             >
                                 <CheckCircle size={16} className={workMode === "Office" ? "opacity-100" : "opacity-0"} />
                                 IN OFFICE
                             </button>
                             <button
-                                onClick={() => setWorkMode("Field")}
+                                onClick={() => handleWorkModeChange("Field")}
                                 className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-xs tracking-wider transition-all ${workMode === "Field" ? "bg-white text-emerald-600 shadow-md scale-[1.02]" : "text-gray-500 hover:text-gray-700"}`}
                             >
                                 <Globe size={16} className={workMode === "Field" ? "opacity-100" : "opacity-0"} />
@@ -431,7 +467,34 @@ export default function QuickAttendance() {
                             </button>
                         </div>
 
-                        {/* Operations Row */}
+                        {geofenceDistance !== null && (
+                            <div className={`mb-6 p-4 rounded-2xl flex items-center gap-3 ${
+                                isWithinGeofence 
+                                    ? "bg-green-50 border border-green-200" 
+                                    : "bg-amber-50 border border-amber-200"
+                            }`}>
+                                {isWithinGeofence ? (
+                                    <ShieldCheck size={24} className="text-green-600" />
+                                ) : (
+                                    <ShieldAlert size={24} className="text-amber-600" />
+                                )}
+                                <div className="flex-1">
+                                    <span className={`block text-sm font-bold ${isWithinGeofence ? "text-green-700" : "text-amber-700"}`}>
+                                        {isWithinGeofence 
+                                            ? "You are within office zone" 
+                                            : `Outside office zone (${Math.round(geofenceDistance)}m away)`
+                                        }
+                                    </span>
+                                    <span className="block text-xs text-gray-500 mt-0.5">
+                                        {isWithinGeofence 
+                                            ? "Office attendance mode available" 
+                                            : "Please use Field Work mode to mark attendance"
+                                        }
+                                    </span>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="flex flex-wrap gap-4 mb-10">
                             <button
                                 onClick={startCamera}
@@ -442,23 +505,24 @@ export default function QuickAttendance() {
                             </button>
                             <button
                                 onClick={() => handleMarkAttendance('entry')}
-                                disabled={!cameraActive || loading}
-                                className={`flex-1 px-10 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-xl active:scale-95 ${(!cameraActive || loading) ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none" : "bg-green-600 text-white hover:bg-green-700 hover:-translate-y-0.5"}`}
+                                disabled={!cameraActive || loading || isLoggedIn}
+                                title={isLoggedIn ? "You are already logged in. Logout to mark login again." : "Mark your arrival"}
+                                className={`flex-1 px-10 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-xl active:scale-95 ${(!cameraActive || loading || isLoggedIn) ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none opacity-50" : "bg-green-600 text-white hover:bg-green-700 hover:-translate-y-0.5"}`}
                             >
                                 {loading && <RotateCw className="animate-spin mr-2 inline" size={16} />}
-                                LOGIN
+                                {isLoggedIn ? "LOGGED IN" : "LOGIN"}
                             </button>
                             <button
                                 onClick={() => handleMarkAttendance('exit')}
-                                disabled={!cameraActive || loading}
-                                className={`flex-1 px-10 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-xl active:scale-95 ${(!cameraActive || loading) ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none" : "bg-red-600 text-white hover:bg-red-700 hover:-translate-y-0.5"}`}
+                                disabled={!cameraActive || loading || !isLoggedIn}
+                                title={!isLoggedIn ? "You must login first before logging out." : "Mark your departure"}
+                                className={`flex-1 px-10 py-3.5 rounded-2xl font-black text-xs tracking-widest transition-all shadow-xl active:scale-95 ${(!cameraActive || loading || !isLoggedIn) ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none opacity-50" : "bg-red-600 text-white hover:bg-red-700 hover:-translate-y-0.5"}`}
                             >
                                 {loading && <RotateCw className="animate-spin mr-2 inline" size={16} />}
-                                LOGOUT
+                                {!isLoggedIn ? "NOT LOGGED IN" : "LOGOUT"}
                             </button>
                         </div>
 
-                        {/* Status Grid */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className="p-5 rounded-2xl bg-slate-50 border border-slate-100 flex flex-col justify-center">
                                 <span className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">FACE STATUS</span>
@@ -488,8 +552,7 @@ export default function QuickAttendance() {
                     font-family: 'Plus Jakarta Sans', sans-serif;
                 }
             `}</style>
-        </div >
+        </div>
     );
 }
-
 

@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Navigate, useLocation } from "react-router-dom";
+import { supabase } from "../lib/supabaseClient";
 
 const AUTH_KEY = "HRMSS_AUTH_SESSION";
 const COMPLETION_KEY = (role) => `hrmss.signin.completed.${role}`;
@@ -16,6 +17,7 @@ function readSession() {
 export default function RequireProfileSetup({ children }) {
   const location = useLocation();
   const session = readSession();
+  const [designation, setDesignation] = useState("");
 
   console.log(`[RequireProfileSetup] Path: ${location.pathname}, Session: ${session ? "Exists" : "MISSING"}`);
   if (session) {
@@ -28,12 +30,63 @@ export default function RequireProfileSetup({ children }) {
     return <Navigate to="/login" replace />;
   }
 
+  // Fetch designation from employees table on mount
+  useEffect(() => {
+    async function fetchDesignation() {
+      const storedDesignation = session?.designation || "";
+      
+      // If no designation in session, try to fetch from employees table
+      if (!storedDesignation && session.employee_id) {
+        console.log("[RequireProfileSetup] No designation in session, fetching from employees table...");
+        try {
+          const { data, error } = await supabase
+            .from("employees")
+            .select("designation")
+            .eq("employee_id", session.employee_id)
+            .maybeSingle();
+          
+          if (!error && data?.designation) {
+            console.log("[RequireProfileSetup] Fetched designation from employees table:", data.designation);
+            setDesignation(data.designation);
+            
+            // Update session with fetched designation
+            try {
+              const updatedSession = { ...session, designation: data.designation };
+              localStorage.setItem(AUTH_KEY, JSON.stringify(updatedSession));
+            } catch (e) {
+              console.warn("[RequireProfileSetup] Failed to update session:", e.message);
+            }
+            return;
+          }
+        } catch (e) {
+          console.warn("[RequireProfileSetup] Failed to fetch designation:", e.message);
+        }
+      }
+      
+      setDesignation(storedDesignation);
+    }
+    
+    fetchDesignation();
+  }, [session]);
+
   const role = session.role || session.loginRole || "employee";
   const idLower = String(session.employee_id || session.employeeId || session.identifier || session.id || "").toLowerCase();
   const mailLower = String(session.email || session.officialEmail || "").toLowerCase();
-  const designLower = String(session.designation || "").toLowerCase();
+  
+  // Use fetched designation or fallback to session designation
+  const designLower = designation ? designation.toLowerCase() : String(session.designation || "").toLowerCase();
 
-  const isFounderMatch =
+  // Fixed role detection with simpler includes() for flexibility
+  // Priority: Employee -> Founder -> HR -> Manager
+  
+  // Check for Employee first (most common)
+  const isEmployeeRole = 
+    designLower === "employee" ||
+    designLower.includes("employee");
+  
+  // Check for Founder
+  const founderKeywords = ["founder", "boss", "ceo", "owner", "proprietor"];
+  const isFounderMatch = !isEmployeeRole && (
     mailLower.startsWith("founder") ||
     idLower.includes("founder") ||
     mailLower.includes("founder") ||
@@ -41,10 +94,23 @@ export default function RequireProfileSetup({ children }) {
     designLower.includes("boss") ||
     idLower.startsWith("fnd") ||
     idLower.startsWith("f0") ||
-    idLower === "founder";
+    idLower === "founder" ||
+    founderKeywords.some(kw => designLower.includes(kw))
+  );
 
-  const isManagerMatch = !isFounderMatch && designLower.includes("manager");
-  const isHRMatch = !isFounderMatch && !isManagerMatch && (designLower.includes("hr") || designLower.includes("admin") || role === "hr" || role === "admin");
+  // Check for Manager (only if not founder and not employee)
+  const isManagerMatch = !isEmployeeRole && !isFounderMatch && (
+    designLower.includes("manager")
+  );
+
+  // Check for HR (hr, human resource, admin)
+  const isHRMatch = !isEmployeeRole && !isFounderMatch && !isManagerMatch && (
+    designLower.includes("hr") ||
+    designLower.includes("human resource") ||
+    designLower.includes("admin") ||
+    role === "hr" ||
+    role === "admin"
+  );
 
   const isOnFounderDash = location.pathname.startsWith("/founder-dashboard");
   const isOnManagerDash = location.pathname.startsWith("/manager-dashboard");
@@ -70,33 +136,6 @@ export default function RequireProfileSetup({ children }) {
     return <Navigate to="/employee-dashboard" replace />;
   }
 
-  // Profile completion check disabled as per user request
-  /*
-  const done = (localStorage.getItem(COMPLETION_KEY(role)) === "true") || isFounderMatch || isManagerMatch || isHRMatch;
-
-  if (!done) {
-    const empId =
-      role === "employee" || role === "admin"
-        ? (session.employee_id || session.identifier || session.id || "").trim()
-        : "";
-
-    console.warn(`[RequireProfileSetup] Redirecting to /sign-in. Role: ${role}, Done: ${done}, Path: ${location.pathname}`);
-
-    return (
-      <Navigate
-        to="/sign-in"
-        replace
-        state={{
-          role,
-          redirectTo: location.pathname,
-          empId,
-        }}
-      />
-    );
-  }
-  */
-
   return children;
 }
-
 

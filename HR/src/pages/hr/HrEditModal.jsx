@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   MapPin,
   IdCard,
@@ -15,6 +15,8 @@ import {
   Plus,
   Trash2,
   CreditCard,
+  ToggleLeft,
+  ToggleRight,
 } from "lucide-react";
 
 /* ---------------------- CONSTANTS ---------------------- */
@@ -23,6 +25,27 @@ const DEPARTMENTS = [
   "Manager",
   "Employee",
 ];
+
+// Helper function to get unique designations case-insensitively
+// Now fetches from existing employees to populate dropdown
+const getUniqueDesignations = (existingDesignation = "") => {
+  // Combine default departments with any existing designation
+  const all = [...DEPARTMENTS];
+  if (existingDesignation && !all.some(d => d.toLowerCase() === existingDesignation.toLowerCase())) {
+    all.push(existingDesignation);
+  }
+  
+  // Remove duplicates case-insensitively, keeping first occurrence
+  const normalizedMap = new Map();
+  for (const d of all) {
+    const lower = d.toLowerCase();
+    if (!normalizedMap.has(lower)) {
+      normalizedMap.set(lower, d);
+    }
+  }
+  
+  return Array.from(normalizedMap.values()).sort((a, b) => a.localeCompare(b));
+};
 
 /* ===================== HELPER COMPONENTS ===================== */
 
@@ -414,13 +437,25 @@ export default function EditProfileModal({ profile, onSave, onClose }) {
             return;
           }
 
+          // If "Other" is selected, custom reason is required
+          if (f.work_status === "Inactive" && f.reason_for_leave === "Other" && !f.custom_exit_reason) {
+            alert("Please specify the reason for exit.");
+            return;
+          }
+
+          // Construct final reason_for_leave - combine "Other" with custom reason
+          let finalReasonForLeave = f.reason_for_leave;
+          if (f.work_status === "Inactive" && f.reason_for_leave === "Other" && f.custom_exit_reason) {
+            finalReasonForLeave = f.custom_exit_reason;
+          }
+
           // Reconstruct full object to ensure nothing is lost
           const next = {
             ...f,
             name: f.name || "",
             id: f.id || job.employeeId || "",
             exit_date: f.work_status === "Inactive" ? f.exit_date : "",
-            reason_for_leave: f.work_status === "Inactive" ? f.reason_for_leave : "",
+            reason_for_leave: f.work_status === "Inactive" ? finalReasonForLeave : "",
             personal: { ...(f.personal || {}) },
             job: { ...(f.job || {}) },
             skills: { ...(f.skills || {}) },
@@ -452,13 +487,21 @@ export default function EditProfileModal({ profile, onSave, onClose }) {
           />
 
           <Field
+            icon={User}
+            label="USERNAME (LOGIN)"
+            value={f.username}
+            onChange={(v) => setF((p) => ({ ...p, username: v }))}
+            placeholder="Username"
+          />
+
+          <Field
             icon={IdCard}
             label="EMPLOYEE ID"
             value={f.id || job.employeeId}
             onChange={(v) => {
               setF((p) => ({ ...p, id: v, job: { ...(p.job || {}), employeeId: v } }));
             }}
-            placeholder="HR-001"
+            placeholder="VS-001"
           />
 
           <Field
@@ -475,12 +518,12 @@ export default function EditProfileModal({ profile, onSave, onClose }) {
           <FieldSelect
             icon={Briefcase}
             label="DESIGNATION"
-            value={job.designation || f.designation}
+            value={(job && job.designation) || f.designation || ""}
             onChange={(v) => {
               setF(p => ({ ...p, designation: v }));
               setJob("designation", v);
             }}
-            options={DEPARTMENTS}
+            options={getUniqueDesignations((job && job.designation) || f.designation)}
           />
 
           <Field
@@ -493,6 +536,43 @@ export default function EditProfileModal({ profile, onSave, onClose }) {
               setJob("joiningDate", v);
             }}
           />
+
+          {/* WORK STATUS DROPDOWN - Active/Inactive */}
+          <div className="md:col-span-2">
+            <div className="space-y-1.5">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">WORK STATUS</p>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="work_status"
+                    value="Active"
+                    checked={f.work_status !== "Inactive"}
+                    onChange={(e) => setF(p => ({ ...p, work_status: e.target.value }))}
+                    className="w-4 h-4 text-[#598791] focus:ring-[#598791]"
+                  />
+                  <span className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                    <ToggleRight className="w-5 h-5 text-green-500" />
+                    Active
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="work_status"
+                    value="Inactive"
+                    checked={f.work_status === "Inactive"}
+                    onChange={(e) => setF(p => ({ ...p, work_status: e.target.value }))}
+                    className="w-4 h-4 text-red-600 focus:ring-red-600"
+                  />
+                  <span className="text-sm font-medium text-slate-700 flex items-center gap-1">
+                    <ToggleLeft className="w-5 h-5 text-red-500" />
+                    Inactive
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
 
           <div className="md:col-span-2">
             <p className="text-[10px] text-slate-400 italic px-2">
@@ -520,6 +600,19 @@ export default function EditProfileModal({ profile, onSave, onClose }) {
                 options={["Resigned", "Terminated", "Absconded", "Other"]}
               />
             </div>
+            
+            {/* Show custom reason field when "Other" is selected */}
+            {f.reason_for_leave === "Other" && (
+              <div className="mt-4">
+                <Field
+                  icon={Briefcase}
+                  label="SPECIFY REASON *"
+                  value={f.custom_exit_reason || ""}
+                  onChange={(v) => setF((p) => ({ ...p, custom_exit_reason: v }))}
+                  placeholder="Please specify the reason for exit"
+                />
+              </div>
+            )}
           </div>
         )}
       </div>

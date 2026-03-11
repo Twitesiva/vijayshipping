@@ -71,17 +71,14 @@ class AttendanceService:
     def get_active_session(self, employee_id: str, use_cache: bool = False) -> Optional[dict]:
         """Check if user has an active session (punched in but not out)"""
         now = time.time()
-        if use_cache and employee_id in self._session_cache:
-            is_active, ts = self._session_cache[employee_id]
-            if now - ts < self._session_cache_ttl:
-                # Return a minimal placeholder if it exists, or None. 
-                # Note: This is an optimization for the detection loop.
-                return {"id": "cached", "status": "active"} if is_active else None
-
+        
+        # Always query database for fresh session status to ensure cross-platform consistency
+        # This ensures that login/logout from different methods (QuickAttendance vs MarkAttendancePage)
+        # are always reflected correctly
         res = self.supabase.table("attendance").select("id, status, check_in").eq("employee_id", employee_id).is_("check_out", "null").execute()
         session = res.data[0] if res.data else None
         
-        # Update cache
+        # Update cache after fresh query
         self._session_cache[employee_id] = (session is not None, now)
         return session
     
@@ -195,6 +192,8 @@ class AttendanceService:
 
             if action == 'exit':
                 if not active_session:
+                    # Update cache to reflect logged out state
+                    self._session_cache[employee_id] = (False, time.time())
                     return True, "No active session found (Already logged out).", {
                         "employee_id": employee_id,
                         "full_name": full_name,
@@ -229,6 +228,9 @@ class AttendanceService:
                 res = self.supabase.table("attendance").update(update_data).eq("id", session_id).execute()
                 if not res.data:
                     return False, "Failed to update attendance session in database.", None
+                
+                # Update cache to reflect logged out state
+                self._session_cache[employee_id] = (False, time.time())
                     
                 msg = f"Logout Marked Successfully! Duration: {duration_hours}h"
                 att_status = "Out"
@@ -261,6 +263,10 @@ class AttendanceService:
                     return False, "Failed to create attendance session in database.", None
                     
                 session_id = res.data[0]["id"]
+                
+                # Update cache to reflect logged in state
+                self._session_cache[employee_id] = (True, time.time())
+                
                 msg = "Login Marked Successfully!"
                 att_status = "In"
             
@@ -310,6 +316,128 @@ class AttendanceService:
             
         except Exception as e:
             return False, f"Error marking attendance: {str(e)}", None
+
+    def close_stale_sessions(self):
+        """Find active sessions from previous days and close them at 23:59:59 of that day"""
+        try:
+            today_str = date.today().isoformat()
+            # Find all active sessions where attendance_date is before today
+            res = self.supabase.table("attendance").select("id, employee_id, check_in, attendance_date").eq("status", "active").lt("attendance_date", today_str).execute()
+            
+            stale_sessions = res.data or []
+            if not stale_sessions:
+                return
+                
+            print(f"AUTO-LOGOUT: Closing {len(stale_sessions)} stale sessions...")
+            
+            for sess in stale_sessions:
+                try:
+                    sess_id = sess["id"]
+                    att_date = sess["attendance_date"]
+                    check_in_str = sess["check_in"]
+                    
+                    # Set check_out to 23:59:59 of the attendance_date
+                    check_out_dt = datetime.fromisoformat(f"{att_date}T23:59:59").replace(tzinfo=timezone.utc)
+                    
+                    # Calculate duration
+                    if check_in_str.endswith('Z'):
+                        check_in_str = check_in_str.replace('Z', '+00:00')
+                    check_in_dt = datetime.fromisoformat(check_in_str)
+                    if check_in_dt.tzinfo is None:
+                        check_in_dt = check_in_dt.replace(tzinfo=timezone.utc)
+                        
+                    duration_seconds = (check_out_dt - check_in_dt).total_seconds()
+                    duration_hours = round(max(0, duration_seconds / 3600.0), 2)
+                    
+                    self.supabase.table("attendance").update({
+                        "check_out": check_out_dt.isoformat(),
+                        "total_hours": duration_hours,
+                        "status": "completed",
+                        "exit_address": "Auto-Logged Out"
+                    }).eq("id", sess_id).execute()
+                    
+                    # Clear session cache for this employee
+                    self._session_cache.pop(sess["employee_id"], None)
+                    print(f"AUTO-LOGOUT: Closed session {sess_id} for {sess['employee_id']}")
+                except Exception as e:
+                    print(f"Error closing stale session {sess.get('id')}: {e}")
+                    
+        except Exception as e:
+            print(f"Error in close_stale_sessions: {e}")
+
+    def close_today_active_sessions(self):
+        """
+        Close all active sessions for TODAY at 23:59:59.
+        This runs at midnight to auto-logout employees who forgot to logout.
+        """
+        try:
+            today_str = date.today().isoformat()
+            
+            # Find all active sessions for today
+            res = self.supabase.table("attendance").select(
+                "id, employee_id, check_in, attendance_date"
+            ).eq("status", "active").eq("attendance_date", today_str).execute()
+            
+            active_sessions_today = res.data or []
+            if not active_sessions_today:
+                print("MIDNIGHT AUTO-LOGOUT: No active sessions to close for today.")
+                return {
+                    "success": True,
+                    "message": "No active sessions to close",
+                    "closed_count": 0
+                }
+            
+            print(f"MIDNIGHT AUTO-LOGOUT: Closing {len(active_sessions_today)} active sessions for today...")
+            
+            closed_count = 0
+            for sess in active_sessions_today:
+                try:
+                    sess_id = sess["id"]
+                    emp_id = sess["employee_id"]
+                    check_in_str = sess["check_in"]
+                    
+                    # Set check_out to 23:59:59 of today
+                    check_out_dt = datetime.fromisoformat(f"{today_str}T23:59:59").replace(tzinfo=timezone.utc)
+                    
+                    # Calculate duration
+                    if check_in_str.endswith('Z'):
+                        check_in_str = check_in_str.replace('Z', '+00:00')
+                    check_in_dt = datetime.fromisoformat(check_in_str)
+                    if check_in_dt.tzinfo is None:
+                        check_in_dt = check_in_dt.replace(tzinfo=timezone.utc)
+                    
+                    duration_seconds = (check_out_dt - check_in_dt).total_seconds()
+                    duration_hours = round(max(0, duration_seconds / 3600.0), 2)
+                    
+                    self.supabase.table("attendance").update({
+                        "check_out": check_out_dt.isoformat(),
+                        "total_hours": duration_hours,
+                        "status": "completed",
+                        "exit_address": "Auto-Logged Out at Midnight"
+                    }).eq("id", sess_id).execute()
+                    
+                    # Clear session cache for this employee
+                    self._session_cache.pop(emp_id, None)
+                    
+                    print(f"MIDNIGHT AUTO-LOGOUT: Closed session {sess_id} for employee {emp_id}. Duration: {duration_hours}h")
+                    closed_count += 1
+                    
+                except Exception as e:
+                    print(f"Error closing session {sess.get('id')}: {e}")
+            
+            return {
+                "success": True,
+                "message": f"Auto-logged out {closed_count} employees",
+                "closed_count": closed_count
+            }
+                    
+        except Exception as e:
+            print(f"Error in close_today_active_sessions: {e}")
+            return {
+                "success": False,
+                "message": str(e),
+                "closed_count": 0
+            }
 
 # Global instance
 attendance_service = AttendanceService()

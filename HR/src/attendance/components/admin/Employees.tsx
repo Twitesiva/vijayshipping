@@ -32,14 +32,20 @@ import {
     FiberManualRecord as DotIcon,
     WarningAmber as WarningIcon,
     EditOutlined as EditIcon,
-    DeleteOutline as DeleteIcon
+    DeleteOutline as DeleteIcon,
+    Download as DownloadIcon,
+    CalendarMonth as CalendarIcon,
+    Close as CloseIcon
 } from '@mui/icons-material';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import EmployeeTable from './EmployeeTable';
 import FaceEnrollmentModal from './FaceEnrollmentModal';
 import { TableSkeleton } from '../../components/common/Skeletons';
 import Alerts, { AlertState } from '../../components/common/Alerts';
 import { API_BASE } from '../../lib/api';
 import { getToken } from '../../lib/storage';
+import { formatDate, formatTime } from '../../lib/format';
 import { useFaceEnrollment } from '../../hooks/useFaceEnrollment';
 import { Employee } from '../../types';
 
@@ -57,10 +63,19 @@ export default function Employees() {
     const [deleteConfirmation, setDeleteConfirmation] = React.useState('');
     const [deleting, setDeleting] = React.useState(false);
 
+    // List Filters
+    const [dateFrom, setDateFrom] = React.useState(new Date().toISOString().split('T')[0]);
+    const [dateTo, setDateTo] = React.useState(new Date().toISOString().split('T')[0]);
+
+    // Download states
+    const [downloadDialogOpen, setDownloadDialogOpen] = React.useState(false);
+    const [downloadOption, setDownloadOption] = React.useState('list');
+    const [exporting, setExporting] = React.useState(false);
+
 
 
     const [departments, setDepartments] = React.useState<Array<{ id: string; name: string }>>([]);
-    const departmentOptions = departments.map((d) => d.name);
+    const departmentOptions = departments.map((d: { id: string; name: string }) => d.name);
 
     const enrollment = useFaceEnrollment(() => {
         showAlert('Face enrollment completed!', 'success');
@@ -121,7 +136,7 @@ export default function Employees() {
 
 
 
-    const filteredEmployees = employees.filter(emp =>
+    const filteredEmployees = employees.filter((emp: Employee) =>
         emp.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         emp.employee_id?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         emp.department?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -129,8 +144,8 @@ export default function Employees() {
 
     const stats = {
         total: employees.length,
-        active: employees.filter(e => e.is_active).length,
-        verified: employees.filter(e => e.has_face_enrolled).length
+        active: employees.filter((e: Employee) => e.is_active).length,
+        verified: employees.filter((e: Employee) => e.has_face_enrolled).length
     };
 
     const roleMeta = (role?: string) => {
@@ -213,6 +228,141 @@ export default function Employees() {
         }
     };
 
+    const handleDownloadEmployeeList = (format: 'csv' | 'pdf') => {
+        if (filteredEmployees.length === 0) return;
+        
+        if (format === 'csv') {
+            const headers = ["ID", "Name", "Department", "Designation", "Joining Date", "Status"];
+            const rows = filteredEmployees.map((e: Employee) => [
+                e.employee_id || '',
+                e.full_name || '',
+                e.department || '',
+                e.designation || '',
+                e.join_date || '',
+                e.is_active ? 'Active' : 'Inactive'
+            ]);
+            
+            const csvContent = [headers, ...rows].map((e: string[]) => e.join(",")).join("\n");
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", `Employee_List_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else {
+            const doc = new jsPDF();
+            doc.text("Employee Directory", 14, 15);
+            doc.setFontSize(10);
+            doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 22);
+
+            const tableColumn = ["ID", "Name", "Dept", "Designation", "Status"];
+            const tableRows = filteredEmployees.map(e => [
+                e.employee_id,
+                e.full_name,
+                e.department,
+                e.designation,
+                e.is_active ? 'Active' : 'Inactive'
+            ]);
+
+            autoTable(doc, {
+                head: [tableColumn],
+                body: tableRows,
+                startY: 30,
+                theme: 'striped'
+            });
+
+            doc.save(`Employee_Directory_${new Date().toISOString().split('T')[0]}.pdf`);
+        }
+    };
+
+    const handleDownloadAttendanceLogs = async (format: 'csv' | 'pdf') => {
+        setExporting(true);
+        try {
+            const token = getToken();
+            const params = new URLSearchParams({
+                date_from: dateFrom,
+                date_to: dateTo,
+                limit: '5000'
+            });
+            
+            const response = await fetch(`${API_BASE}/admin/attendance-records?${params.toString()}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            
+            if (!response.ok) throw new Error('Failed to fetch records');
+            const data = await response.json();
+            const records = data.records || [];
+            
+            if (records.length === 0) {
+                showAlert('No records found for the selected period', 'warning');
+                return;
+            }
+
+            if (format === 'csv') {
+                const headers = ["Date", "Employee Name", "ID", "Login", "Logout", "Duration", "Type", "Location"];
+                const rows = records.map((r: any) => [
+                    formatDate(r.check_in),
+                    r.full_name,
+                    r.employee_id,
+                    formatTime(r.check_in),
+                    formatTime(r.check_out),
+                    r.formatted_duration,
+                    r.is_field_work ? 'Field' : 'Office',
+                    r.entry_location_display || 'Office'
+                ]);
+                
+                const csvContent = "\uFEFF" + [headers, ...rows].map((e: (string|number)[]) => e.map((cell: any) => `"${(cell || '').toString().replace(/"/g, '""')}"`).join(",")).join("\n");
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", `Attendance_Logs_${dateFrom}_to_${dateTo}.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            } else {
+                const doc = new jsPDF('landscape');
+                doc.text("Attendance Logs", 14, 15);
+                doc.setFontSize(10);
+                doc.text(`Period: ${dateFrom} to ${dateTo}`, 14, 22);
+
+                const tableColumn = ["Date", "Name", "ID", "In", "Out", "Duration", "Type", "Location"];
+                const tableRows = records.map((r: any) => [
+                    formatDate(r.check_in),
+                    r.full_name,
+                    r.employee_id,
+                    formatTime(r.check_in),
+                    formatTime(r.check_out),
+                    r.formatted_duration,
+                    r.is_field_work ? 'Field' : 'Office',
+                    r.entry_location_display || 'Office'
+                ]);
+
+                autoTable(doc, {
+                    head: [tableColumn],
+                    body: tableRows,
+                    startY: 30,
+                    theme: 'striped',
+                    styles: { fontSize: 8 },
+                    columnStyles: {
+                        7: { cellWidth: 60 } // Location column wider
+                    }
+                });
+
+                doc.save(`Attendance_Logs_${dateFrom}_to_${dateTo}.pdf`);
+            }
+            setDownloadDialogOpen(false);
+        } catch (err) {
+            showAlert('Failed to download: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
+        } finally {
+            setExporting(false);
+        }
+    };
+
 
 
     return (
@@ -253,7 +403,21 @@ export default function Employees() {
                             </Box>
                         </Stack>
                     </Box>
-
+                    <Stack direction="row" spacing={2}>
+                        <Button
+                            variant="outlined"
+                            startIcon={<DownloadIcon />}
+                            onClick={() => setDownloadDialogOpen(true)}
+                            sx={{
+                                borderRadius: '12px',
+                                textTransform: 'none',
+                                fontWeight: 700,
+                                px: 3
+                            }}
+                        >
+                            Download
+                        </Button>
+                    </Stack>
                 </Stack>
 
 
@@ -271,12 +435,12 @@ export default function Employees() {
                 <CardContent sx={{ p: 0 }}>
                     <Box sx={{ p: 3 }}>
                         <Grid container spacing={2} alignItems="center">
-                            <Grid item xs={12} md={6}>
+                            <Grid item xs={12} md={5}>
                                 <TextField
                                     fullWidth
                                     placeholder="Search by name, ID or department..."
                                     value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    onChange={(e: any) => setSearchTerm(e.target.value)}
                                     InputProps={{
                                         startAdornment: (
                                             <InputAdornment position="start">
@@ -286,6 +450,28 @@ export default function Employees() {
                                         sx: { borderRadius: '16px', bgcolor: 'action.hover', border: 'none', '& fieldset': { border: 'none' } }
                                     }}
                                 />
+                            </Grid>
+                            <Grid item xs={6} md={3.5}>
+                                <Stack direction="row" spacing={1} alignItems="center">
+                                    <TextField
+                                        type="date"
+                                        size="small"
+                                        label="From"
+                                        value={dateFrom}
+                                        onChange={(e: any) => setDateFrom(e.target.value)}
+                                        InputLabelProps={{ shrink: true }}
+                                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: '12px' } }}
+                                    />
+                                    <TextField
+                                        type="date"
+                                        size="small"
+                                        label="To"
+                                        value={dateTo}
+                                        onChange={(e: any) => setDateTo(e.target.value)}
+                                        InputLabelProps={{ shrink: true }}
+                                        sx={{ '& .MuiOutlinedInput-root': { borderRadius: '12px' } }}
+                                    />
+                                </Stack>
                             </Grid>
                             <Grid item xs={12} md={6}>
                                 <Stack direction="row" spacing={2} justifyContent={{ xs: 'flex-start', md: 'flex-end' }}>
@@ -422,11 +608,11 @@ export default function Employees() {
                                 Profile Details
                             </Typography>
                             <Stack spacing={2}>
-                                <TextField
+                                    <TextField
                                     label="Full Name"
                                     fullWidth
                                     value={profileForm.full_name}
-                                    onChange={(e) => setProfileForm((p) => ({ ...p, full_name: e.target.value }))}
+                                    onChange={(e) => setProfileForm((p: any) => ({ ...p, full_name: e.target.value }))}
                                 />
                                 <TextField
                                     label="Email"
@@ -439,7 +625,7 @@ export default function Employees() {
                                     label="Designation"
                                     fullWidth
                                     value={profileForm.department}
-                                    onChange={(e) => setProfileForm((p) => ({ ...p, department: e.target.value }))}
+                                    onChange={(e) => setProfileForm((p: any) => ({ ...p, department: e.target.value }))}
                                 >
                                     <MenuItem value="">Select Designation</MenuItem>
                                     {['Manager', 'Employee', 'Founder'].map((dept) => (
@@ -556,7 +742,81 @@ export default function Employees() {
                     </Button>
                 </DialogActions>
             </Dialog>
-            <Alerts alert={alert} onClose={() => setAlert(p => ({ ...p, open: false }))} />
+
+            {/* Download Dialog */}
+            <Dialog 
+                open={downloadDialogOpen} 
+                onClose={() => !exporting && setDownloadDialogOpen(false)}
+                maxWidth="xs" 
+                fullWidth
+                PaperProps={{
+                    sx: { borderRadius: '20px', p: 1 }
+                }}
+            >
+                <DialogTitle>
+                    <Stack direction="row" alignItems="center" justifyContent="space-between">
+                        <Stack direction="row" alignItems="center" gap={1}>
+                            <DownloadIcon color="primary" />
+                            <Typography variant="h6" fontWeight={800}>Download Records</Typography>
+                        </Stack>
+                        <IconButton onClick={() => !exporting && setDownloadDialogOpen(false)} size="small">
+                            <CloseIcon />
+                        </IconButton>
+                    </Stack>
+                </DialogTitle>
+                <DialogContent>
+                    <Stack spacing={3} sx={{ mt: 1 }}>
+                        <TextField
+                            select
+                            fullWidth
+                            label="What would you like to download?"
+                            value={downloadOption}
+                            onChange={(e: any) => setDownloadOption(e.target.value)}
+                        >
+                            <MenuItem value="list">Employee List Only</MenuItem>
+                            <MenuItem value="logs">Detailed Attendance Logs (All Records)</MenuItem>
+                        </TextField>
+
+                        <Box sx={{ p: 2, borderRadius: '12px', bgcolor: 'grey.50', border: '1px solid', borderColor: 'divider' }}>
+                            <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                                CURRENT FILTERS
+                            </Typography>
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                Period: {formatDate(dateFrom)} to {formatDate(dateTo)}
+                            </Typography>
+                            {searchTerm && (
+                                <Typography variant="body2">
+                                    Search: "{searchTerm}"
+                                </Typography>
+                            )}
+                        </Box>
+
+                        <Typography variant="body2" color="text.secondary">
+                            Downloading <b>{downloadOption === 'list' ? 'Employee List' : 'Detailed Records'}</b> for the current filters.
+                        </Typography>
+                    </Stack>
+                </DialogContent>
+                <DialogActions sx={{ p: 2, gap: 1 }}>
+                    <Button 
+                        fullWidth 
+                        variant="outlined" 
+                        onClick={() => downloadOption === 'list' ? handleDownloadEmployeeList('csv') : handleDownloadAttendanceLogs('csv')}
+                        disabled={exporting}
+                    >
+                        CSV
+                    </Button>
+                    <Button 
+                        fullWidth 
+                        variant="contained" 
+                        onClick={() => downloadOption === 'list' ? handleDownloadEmployeeList('pdf') : handleDownloadAttendanceLogs('pdf')}
+                        disabled={exporting}
+                    >
+                        {exporting ? 'Processing...' : 'PDF'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            <Alerts alert={alert} onClose={() => setAlert((p: AlertState) => ({ ...p, open: false }))} />
         </Stack>
     );
 }
