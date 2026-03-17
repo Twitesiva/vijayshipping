@@ -260,10 +260,10 @@ export default function Employees() {
 
             const tableColumn = ["ID", "Name", "Dept", "Designation", "Status"];
             const tableRows = filteredEmployees.map(e => [
-                e.employee_id,
-                e.full_name,
-                e.department,
-                e.designation,
+                String(e.employee_id || ''),
+                String(e.full_name || ''),
+                String(e.department || ''),
+                String(e.designation || ''),
                 e.is_active ? 'Active' : 'Inactive'
             ]);
 
@@ -332,14 +332,14 @@ export default function Employees() {
 
                 const tableColumn = ["Date", "Name", "ID", "In", "Out", "Duration", "Type", "Location"];
                 const tableRows = records.map((r: any) => [
-                    formatDate(r.check_in),
-                    r.full_name,
-                    r.employee_id,
-                    formatTime(r.check_in),
-                    formatTime(r.check_out),
-                    r.formatted_duration,
+                    String(formatDate(r.check_in) || ''),
+                    String(r.full_name || ''),
+                    String(r.employee_id || ''),
+                    String(formatTime(r.check_in) || ''),
+                    String(formatTime(r.check_out) || ''),
+                    String(r.formatted_duration || ''),
                     r.is_field_work ? 'Field' : 'Office',
-                    r.entry_location_display || 'Office'
+                    String(r.entry_location_display || 'Office')
                 ]);
 
                 autoTable(doc, {

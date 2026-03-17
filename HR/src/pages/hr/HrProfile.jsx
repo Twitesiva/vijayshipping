@@ -265,15 +265,9 @@ export default function HrProfile() {
           if (emailData) data = emailData;
         }
 
-        // If still not found, try 'hrms_employee_profile'
-        if (!data) {
-          const { data: pByEid } = await supabase
-            .from("hrms_employee_profile")
-            .select("employee_id, full_name, designation, official_email, personal_email, phone, location, gender, department")
-            .eq("employee_id", userId)
-            .maybeSingle();
-          if (pByEid) data = pByEid;
-        }
+// employees table is primary source - fallback removed
+        // (data already from employees or null)
+
 
         // Final fallback for name mapping
         if (data) {
@@ -328,7 +322,7 @@ export default function HrProfile() {
 
         // ⚠️ if your table doesn't have role column, remove role from payload above
         const { error: upErr } = await supabase
-          .from("hrms_employee_profile")
+          .from("employees")
           .upsert(payload, { onConflict: "employee_id" });
 
         if (upErr) throw upErr;
@@ -364,7 +358,7 @@ export default function HrProfile() {
       const payload = profileToDbPayload(next, userId, auth);
 
       const { error } = await supabase
-        .from("hrms_employee_profile")
+        .from("employees")
         .upsert(payload, { onConflict: "employee_id" });
 
       if (error) throw error;

@@ -518,39 +518,6 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
   };
 
   const initializeNetwork = async () => {
-    try {
-      const res = await apiFetch('/attendance/network-info');
-      const data = await res.json();
-
-      if (res.ok && data?.success) {
-        const networkInfo = data?.network_info || {};
-        const detectedSsid = data?.detected_wifi_ssid || networkInfo?.wifi_ssid || '';
-        const networkType = String(networkInfo?.network_type || 'unknown').toLowerCase();
-        const fromBackendName = String(networkInfo?.network_name || '').trim();
-
-        const label = detectedSsid
-          ? `WiFi: ${detectedSsid}`
-          : (fromBackendName || 'Unknown Network');
-
-        setNetworkStatus(label);
-        setCurrentNetwork({
-          type: networkType || 'unknown',
-          ssid: detectedSsid || null
-        });
-
-        if (networkType.includes('wifi')) {
-          setNetworkColor('success.main');
-        } else if (networkType.includes('mobile')) {
-          setNetworkColor('warning.main');
-        } else {
-          setNetworkColor('info.main');
-        }
-        return;
-      }
-    } catch (err) {
-      console.error('Network info error:', err);
-    }
-
     const nav = navigator as Navigator & {
       connection?: { type?: string; effectiveType?: string };
     };

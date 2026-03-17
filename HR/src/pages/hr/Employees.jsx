@@ -189,36 +189,6 @@ export default function Employees() {
     } catch (e) {
       console.warn("Failed to load local metadata fallback:", e);
     }
-
-    try {
-      console.log("[Employees] Fetching persistent deletions...");
-      const { data, error } = await supabase
-        .from("hrmss_notifications")
-        .select("detail")
-        .eq("type", "SYSTEM_METADATA")
-        .eq("title", "SYSTEM_METADATA")
-        .eq("source", "Employees")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        console.error("[Employees] DB Fetch Metadata error:", error);
-        return;
-      }
-
-      if (data?.detail) {
-        console.log("[Employees] Metadata found in DB");
-        const meta = JSON.parse(data.detail);
-        if (meta.deletedDesignations) setDeletedDesignations(meta.deletedDesignations);
-        // Sync to localStorage
-        localStorage.setItem("hrmss_deleted_metadata", JSON.stringify(meta));
-      } else {
-        console.log("[Employees] No metadata record found in DB");
-      }
-    } catch (err) {
-      console.error("[Employees] Metadata processing failed:", err);
-    }
   };
 
   const saveMetadata = async (newDesignations) => {
@@ -233,30 +203,6 @@ export default function Employees() {
       localStorage.setItem("hrmss_deleted_metadata", JSON.stringify(metaObj));
     } catch (e) {
       console.warn("Failed to save to localStorage:", e);
-    }
-
-    try {
-      const payload = {
-        title: "SYSTEM_METADATA",
-        type: "SYSTEM_METADATA",
-        source: "Employees",
-        audience: "all",
-        detail: JSON.stringify(metaObj),
-        created_at: new Date().toISOString()
-      };
-
-      console.log("[Employees] Saving persistent deletions to DB...");
-      const { error } = await supabase
-        .from("hrmss_notifications")
-        .insert([payload]);
-
-      if (error) {
-        console.error("[Employees] DB Save Metadata error:", error);
-      } else {
-        console.log("[Employees] Metadata saved successfully to DB");
-      }
-    } catch (err) {
-      console.error("[Employees] Failed to save metadata:", err);
     }
   };
 

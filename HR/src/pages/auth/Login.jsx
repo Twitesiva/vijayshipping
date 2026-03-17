@@ -13,12 +13,8 @@ import {
 
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient";
 import { MANAGER_SESSION_KEY } from "../manager/managerData";
-import { ensureAdminSupabaseSession } from "../../lib/employeeAuthBridge";
 
 import Preloader from "../../components/Preloader";
-
-const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
-const ATTENDANCE_AUTH_KEY = "HRMSS_ATTENDANCE_AUTH";
 
 const Field = forwardRef(
   (
@@ -210,30 +206,34 @@ export default function Login() {
   };
 
   // ✅ Check Employee profile completion in hrms_employee_profile
+  // Removed hrms_employee_profile check - using RPC profile_completed
   const employeeProfileCompleted = async (employeeId, email) => {
-    const empId = String(employeeId || "").trim();
-    const empEmail = String(email || "").trim();
-    if (!empId && !empEmail) return false;
-
-    let query = supabase
-      .from("hrms_employee_profile")
-      .select("id, profile_completed");
-
-    if (empId) {
-      query = query.eq("employee_id", empId);
-    } else {
-      query = query.or(
-        `official_email.eq.${empEmail},personal_email.eq.${empEmail}`
-      );
-    }
-
-    const { data, error } = await query.maybeSingle();
-
-    if (error) {
-      console.warn("Profile check failed:", error.message);
+    // Check employees table for profile_status or similar
+    if (!employeeId && !email) return false;
+    
+    try {
+      const id = String(employeeId || "").trim();
+      const mail = String(email || "").trim();
+      
+      let query = supabase.from("employees").select("profile_completed,status");
+      
+      if (id) {
+        query = query.eq("employee_id", id);
+      } else if (mail) {
+        query = query.eq("email", mail);
+      }
+      
+      const { data, error } = await query.maybeSingle();
+      
+      if (error) {
+        console.warn("Profile check failed:", error.message);
+        return false;
+      }
+      
+      return data?.profile_completed === true || data?.status === 'active';
+    } catch {
       return false;
-    };
-    return !!data?.profile_completed;
+    }
   };
 
   // ✅ Fetch designation from the 'employees' table (robust lookup)
@@ -265,51 +265,6 @@ export default function Login() {
     } catch (e) {
       console.warn("[Login] fetchUserDesignation non-critical error:", e.message);
       return "";
-    }
-  };
-
-  /* ---------------- SUPABASE AUTH BRIDGE (FOR DOCUMENTS) ---------------- */
-
-  const persistDocsAuth = (params) => {
-    if (!params?.password) return;
-    const payload = {
-      role: params?.role || "",
-      identifier: params?.identifier || "",
-      preferredEmail: params?.preferredEmail || "",
-      password: params?.password || "",
-    };
-    try {
-      sessionStorage.setItem(DOCS_AUTH_KEY, JSON.stringify(payload));
-    } catch {
-      try {
-        localStorage.setItem(DOCS_AUTH_KEY, JSON.stringify(payload));
-      } catch { }
-    }
-  };
-
-
-
-  // ✅ Don't break app login if bridge fails; only log a warning.
-  const tryEnsureSupabaseForDocs = async (params, roleLabelForError = "") => {
-    try {
-      persistDocsAuth(params);
-      await ensureAdminSupabaseSession(params);
-
-
-      // mark ok
-      const k = `hrmss.supabase.docsAuth.ok.${params?.role || "unknown"}`;
-      localStorage.setItem(k, "true");
-      return true;
-    } catch (e) {
-      const k = `hrmss.supabase.docsAuth.ok.${params?.role || "unknown"}`;
-      localStorage.setItem(k, "false");
-
-
-      // Keep app login working, only warn in console. 
-      // Background sync is secondary to app-level RPC login.
-      console.warn(`[DocsAuth] Background sync warning for ${roleLabelForError || "user"}:`, e.message);
-
-      return false;
     }
   };
 
@@ -462,12 +417,8 @@ export default function Login() {
       }
       localStorage.setItem("hrmss.signin.completed." + targetRole, "true");
 
-      await tryEnsureSupabaseForDocs({
-        role: targetRole,
-        identifier: email,
-        password: password,
-        preferredEmail: email,
-      }, targetRole);
+      // Supabase Auth Bridge removed - login works via employees table RPC
+      // Document storage features will use sessionStorage/localStorage directly
 
       navigate(targetPath, { replace: true });
       return;

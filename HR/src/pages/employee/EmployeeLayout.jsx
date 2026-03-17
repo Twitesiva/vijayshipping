@@ -82,17 +82,8 @@ export default function EmployeeLayout() {
       } catch { }
 
       if (employeeId) {
-        // Try hrms_employee_profile first (for employees)
-        const { data: empProfile } = await supabase
-          .from("hrms_employee_profile")
-          .select("designation")
-          .eq("employee_id", employeeId)
-          .maybeSingle();
+        // Using employees table directly (primary source)
 
-        if (empProfile?.designation) {
-          setDesignation(empProfile.designation);
-          return;
-        }
 
         // 2. Try employees table (most reliable for all roles now)
         const { data: empRow } = await supabase
