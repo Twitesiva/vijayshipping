@@ -343,7 +343,8 @@ export default function QuickAttendance() {
             const result = await response.json();
             if (result.success) {
                 const empName = result.data?.full_name || "Employee";
-                setSuccessMessage(`${empName} - ${action === 'entry' ? "Login" : "Logout"} successful!`);
+                const successMsg = action === 'exit' ? result.message : `${empName} - Login successful!`;
+                setSuccessMessage(successMsg);
                 setSubmitted(true);
                 
                 if (action === 'entry') {
@@ -409,13 +410,13 @@ export default function QuickAttendance() {
             <div className="relative z-10 w-full max-w-2xl px-3 sm:px-6 py-6 sm:py-12 animate-in fade-in slide-in-from-bottom-5 duration-700">
                 <div className="bg-white rounded-[32px] shadow-2xl border-none overflow-hidden">
                     <div className="p-5 sm:p-10">
-                        <div className="mb-8 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                            <div>
-                                <h2 className="text-3xl font-black text-gray-900 tracking-tight">My Attendance</h2>
-                                <p className="text-gray-500 text-sm mt-1 font-medium">Mark login and logout for Employees.</p>
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                <div>
+                                    <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">My Attendance</h2>
+                                    <p className="text-gray-500 text-xs sm:text-sm mt-1 font-medium">Mark login and logout for Employees.</p>
+                                </div>
+                                <img src="/VijayShipping_Logo.png" alt="Vijay Shipping" className="h-6 sm:h-10 w-auto self-start sm:self-center" />
                             </div>
-                            <img src="/VijayShipping_Logo.png" alt="Vijay Shipping" className="h-10 w-auto" />
-                        </div>
 
                         <div className="mb-8 relative w-full aspect-video rounded-3xl overflow-hidden border border-gray-100 bg-[#0b1220] shadow-2xl group">
                             {cameraActive ? (
@@ -545,13 +546,6 @@ export default function QuickAttendance() {
                     </div>
                 </div>
             </div>
-
-            <style>{`
-                @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-                body {
-                    font-family: 'Plus Jakarta Sans', sans-serif;
-                }
-            `}</style>
         </div>
     );
 }

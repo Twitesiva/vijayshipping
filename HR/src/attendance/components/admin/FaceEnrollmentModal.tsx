@@ -79,7 +79,7 @@ export default function FaceEnrollmentModal({
 
   return (
     <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: 2, boxShadow: '0 4px 20px rgba(0,0,0,0.1)' } }}>
-      <DialogTitle sx={{ fontFamily: 'Inter, sans-serif', fontWeight: 600, borderBottom: '1px solid #eee' }}>
+      <DialogTitle sx={{ fontFamily: 'Segoe UI, sans-serif', fontWeight: 600, borderBottom: '1px solid #eee' }}>
         <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2 }}>
           <Box>
             Face Enrollment
@@ -114,7 +114,7 @@ export default function FaceEnrollmentModal({
                     bgcolor: isActive ? '#000' : isPast ? '#e0e0e0' : 'transparent',
                     color: isActive ? '#fff' : isPast ? '#333' : '#999',
                     fontSize: '0.85rem',
-                    fontFamily: 'Inter, sans-serif',
+                    fontFamily: 'Segoe UI, sans-serif',
                     fontWeight: 500,
                     border: isActive || isPast ? 'none' : '1px solid #ddd'
                   }}

@@ -1,5 +1,5 @@
 /**
- * Formats a date string or Date object to dd/mm/yyyy format.
+ * Formats a date string or Date object to DD-MM-YYYY format.
  */
 export const formatDate = (date?: string | Date) => {
     if (!date) return '-';
@@ -16,7 +16,7 @@ export const formatDate = (date?: string | Date) => {
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const year = d.getFullYear();
 
-        return `${day}/${month}/${year}`;
+        return `${day}-${month}-${year}`;
     } catch (e) {
         return '-';
     }

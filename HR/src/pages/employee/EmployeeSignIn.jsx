@@ -14,6 +14,7 @@ import {
   CalendarDays,
 } from "lucide-react";
 
+import ImageCropper from "../../components/ImageCropper.jsx";
 import { supabase } from "../../lib/supabaseClient";
 
 import Preloader from "../../components/Preloader";
@@ -157,10 +158,26 @@ const hydrateJobInfoFromEmployees = async (empId, setForm, alreadyMergedRef, isM
   }));
 };
 
+const handleFileSelect = (e) => {
+  const file = e.target.files?.[0];
+  if (file) {
+    setTempFile(file);
+    setShowCropper(true);
+    e.target.value = ''; // Clear input
+  }
+};
+
+const handleCropComplete = async (croppedFile) => {
+  setShowCropper(false);
+  setTempFile(null);
+  if (!croppedFile) return;
+
+  setAvatarFile(croppedFile);
+};
+
 async function uploadAvatar({ folderKey, file }) {
   const cleanName = (file.name || "avatar").replace(/\s+/g, "-");
   const path = `profiles/${folderKey}/${Date.now()}-${cleanName}`;
-
 
   try {
     const { error: upErr } = await supabase.storage
@@ -227,6 +244,8 @@ export default function EmployeeSignIn() {
   const jobInfoMerged = useRef(false);
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarRemoved, setAvatarRemoved] = useState(false);
+  const [showCropper, setShowCropper] = useState(false);
+  const [tempFile, setTempFile] = useState(null);
 
   const [form, setForm] = useState(() => emptyForm(empIdFromLogin, ""));
 
@@ -507,7 +526,7 @@ export default function EmployeeSignIn() {
           localStorage.setItem(PROFILE_CACHE_KEY("employee", empId), JSON.stringify(cacheForm));
         } catch { }
 
-        localStorage.setItem(COMPLETION_KEY(role), "true");
+      localStorage.setItem(COMPLETION_KEY(role), "true");
 
         try {
           const authSession = localStorage.getItem("HRMSS_AUTH_SESSION");
@@ -517,6 +536,10 @@ export default function EmployeeSignIn() {
             localStorage.setItem("HRMSS_AUTH_SESSION", JSON.stringify(parsed));
           }
         } catch { }
+
+        if (tempFile) {
+          URL.revokeObjectURL(tempFile);
+        }
 
 
         // ✅ If editing from dashboard, just go back. Else go to redirect.

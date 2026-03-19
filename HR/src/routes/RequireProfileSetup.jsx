@@ -16,7 +16,7 @@ function readSession() {
 
 export default function RequireProfileSetup({ children }) {
   const location = useLocation();
-  const session = readSession();
+  const session = React.useMemo(() => readSession(), []);
   const [designation, setDesignation] = useState("");
 
   console.log(`[RequireProfileSetup] Path: ${location.pathname}, Session: ${session ? "Exists" : "MISSING"}`);

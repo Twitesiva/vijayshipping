@@ -22,9 +22,12 @@ import {
   useMediaQuery,
   useTheme
 } from '@mui/material';
+import { Download as DownloadIcon } from '@mui/icons-material';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import HistoryTable, { HistoryRecord } from './HistoryTable';
-import { apiFetch } from '../../lib/api';
-import { getUser } from '../../lib/storage';
+import { apiFetch, API_BASE } from '../../lib/api';
+import { getUser, getToken } from '../../lib/storage';
 import { formatDate, formatTime, formatMinutesToHMM } from '../../lib/format';
 
 function toDateOnly(value?: string) {
@@ -322,6 +325,64 @@ export default function EmployeeReports() {
       logs: monthRecords
     };
   }, [selectedMonthKey, records, dateFrom, dateTo, today]);
+  
+  const handleDownloadReport = async () => {
+    const user = getUser<{ employee_id?: string, full_name?: string, username?: string }>();
+    if (!user?.employee_id) return;
+    
+    try {
+      const token = getToken();
+      const params = new URLSearchParams({
+        date_from: dateFrom || '',
+        date_to: dateTo || '',
+        employee_id: user.employee_id,
+        limit: '5000'
+      });
+
+      const response = await fetch(`${API_BASE}/admin/attendance-records?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch detailed records');
+      const data = await response.json();
+      const exportRecords = data.records || [];
+
+      if (exportRecords.length === 0) {
+        alert('No records found for the selected period.');
+        return;
+      }
+
+      const doc = new jsPDF('landscape');
+      doc.text("Detailed Attendance Report", 14, 15);
+      doc.setFontSize(10);
+      doc.text(`Employee: ${user?.full_name || user?.username} (ID: ${user?.employee_id})`, 14, 22);
+      doc.text(`Period: ${dateFrom} to ${dateTo}`, 14, 28);
+
+      const tableColumn = ["Date", "Login", "Logout", "Duration", "Type", "Login Location", "Exit Address"];
+      const tableRows = exportRecords.map((r: any) => [
+        formatDate(r.check_in),
+        formatTime(r.check_in),
+        formatTime(r.check_out),
+        r.formatted_duration || '--',
+        r.is_field_work ? 'Field' : 'Office',
+        r.entry_location_display || 'Office',
+        r.exit_location_display || (r.check_out ? 'Office' : '--')
+      ]);
+
+      autoTable(doc, {
+        head: [tableColumn],
+        body: tableRows,
+        startY: 35,
+        theme: 'striped',
+        styles: { fontSize: 8 },
+        columnStyles: { 5: { cellWidth: 50 }, 6: { cellWidth: 50 } }
+      });
+
+      doc.save(`Attendance_Report_${dateFrom}_to_${dateTo}.pdf`);
+    } catch (err: any) {
+      alert(err.message || 'Export failed');
+    }
+  };
 
   return (
     <Stack spacing={{ xs: 2, sm: 3 }} sx={{ position: 'relative', zIndex: 1 }}>
@@ -356,6 +417,23 @@ export default function EmployeeReports() {
             {filterMode === 'month' && (
               <TextField type="month" label="Select Month" InputLabelProps={{ shrink: true }} value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} size="small" sx={{ width: { xs: '100%', md: 200 }, '& .MuiInputBase-root': { minHeight: { xs: 32, sm: 34 } } }} />
             )}
+            <Button
+              variant="outlined"
+              size="small"
+              startIcon={<DownloadIcon />}
+              onClick={handleDownloadReport}
+              sx={{
+                height: { xs: 32, sm: 34 },
+                borderRadius: '8px',
+                textTransform: 'none',
+                fontWeight: 600,
+                px: 2,
+                fontSize: { xs: '0.7rem', sm: '0.75rem' },
+                flex: { xs: 1, md: 'none' }
+              }}
+            >
+              Download PDF
+            </Button>
           </Stack>
           <Typography variant="body2" sx={{ mt: 0.7, color: 'text.secondary', fontSize: { xs: '0.74rem', sm: '0.82rem' } }}>
             Date Range: {formatDisplayDate(dateFrom)} - {formatDisplayDate(dateTo)}

@@ -441,7 +441,7 @@ class AdminService:
             
             # 2. Fetch enrollment status
             enroll_res = self.supabase.table("face_enrollments").select("employee_id").eq("is_active", True).execute()
-            enrolled_ids = set(e["employee_id"] for e in enroll_res.data) if enroll_res.data else set()
+            enrolled_ids = set((e["employee_id"] or "").strip() for e in enroll_res.data) if enroll_res.data else set()
             
             # 3. Fetch active sessions to determine 'is_active' (online) status
             today = date.today().isoformat()
@@ -449,7 +449,7 @@ class AdminService:
             active_ids = set(a["employee_id"] for a in active_res.data) if active_res.data else set()
             
             for emp in employees:
-                eid = emp.get("employee_id")
+                eid = (emp.get("employee_id") or "").strip()
                 emp["has_face_enrolled"] = eid in enrolled_ids
                 emp["is_active"] = eid in active_ids
                 # Ensure designation or department is safe for frontend
@@ -488,10 +488,10 @@ class AdminService:
                 "name": "full_name",
                 "username": "username",
                 "designation": "designation",
-                "department": "department", # Fixed: Map department to department
+                "department": "department",
                 "email": "email",
-                "mobile_number": "mobile_number",
-                "phone": "mobile_number",
+                "phone": "phone",
+                "mobile_number": "phone",
                 "join_date": "join_date",
                 "joining_date": "join_date",
                 "employee_type": "employee_type",
@@ -581,7 +581,9 @@ class AdminService:
                         "date": d_str,
                         "attendance_type": s.get("is_field_work", False), # Temporary booleans to be processed later
                         "first_login": s["check_in"],
+                        "first_login_location": s.get("entry_location_display") or s.get("entry_address") or "Office",
                         "last_login": s["check_out"],
+                        "last_logout_location": s.get("exit_location_display") or s.get("exit_address") or "--",
                         "total_hours": 0,
                         "types": set(),
                         "is_active": False,
@@ -591,16 +593,19 @@ class AdminService:
                 # Track types
                 agg[key]["types"].add("Field" if s.get("is_field_work") else "Office")
                 
-                # Update first login
+                # Update first login and its location
                 if s["check_in"] < agg[key]["first_login"]:
                     agg[key]["first_login"] = s["check_in"]
+                    agg[key]["first_login_location"] = s.get("entry_location_display") or s.get("entry_address") or "Office"
                 
-                # Update last login
+                # Update last login and its location
                 if s["check_out"]:
                     if not agg[key]["last_login"] or s["check_out"] > agg[key]["last_login"]:
                         agg[key]["last_login"] = s["check_out"]
+                        agg[key]["last_logout_location"] = s.get("exit_location_display") or s.get("exit_address") or "Office"
                 else:
                     agg[key]["is_active"] = True
+                    agg[key]["last_logout_location"] = "Active"
                 
                 agg[key]["total_hours"] += s.get("total_hours", 0)
                 agg[key]["sessions"].append(s)
@@ -661,6 +666,89 @@ class AdminService:
             }
         except Exception as e:
             print(f"Error in get_aggregated_report: {e}")
+            return {"success": False, "message": str(e), "records": []}
+
+    async def get_employee_summary_report(self, date_from: str, date_to: str) -> Dict[str, Any]:
+        """Level 1: Aggregated report for all employees showing total present and absent days"""
+        try:
+            # 1. Fetch all employees (Exclude Founder/Boss)
+            res = self.supabase.table("employees").select("employee_id, full_name, department, designation").execute()
+            
+            def is_founder(d):
+                d_low = str(d or "").lower()
+                return "founder" in d_low or "boss" in d_low
+
+            all_employees = [e for e in (res.data or []) if not is_founder(e.get("designation"))]
+            
+            # 2. Fetch all attendance records in range
+            query = self.supabase.table("attendance").select("employee_id, attendance_date") \
+                .gte("attendance_date", date_from) \
+                .lte("attendance_date", date_to)
+            
+            att_res = query.execute()
+            att_data = att_res.data or []
+            
+            # 3. Process counts
+            # Group unique attendance dates by employee_id
+            present_dates_map = {}
+            for r in att_data:
+                eid = r["employee_id"]
+                d = r["attendance_date"]
+                if eid not in present_dates_map:
+                    present_dates_map[eid] = set()
+                present_dates_map[eid].add(d)
+
+            # 4. Calculate working days in period (Excluding Sundays)
+            working_dates = []
+            try:
+                d1 = datetime.fromisoformat(date_from).date()
+                d2 = datetime.fromisoformat(date_to).date()
+                today_dt = date.today()
+                if d2 > today_dt: d2 = today_dt
+                
+                total_days = (d2 - d1).days + 1
+                if total_days > 0:
+                    for i in range(total_days):
+                        curr = d1 + timedelta(days=i)
+                        if curr.weekday() < 6: # Mon-Sat
+                            working_dates.append(curr.isoformat())
+            except Exception as e:
+                print(f"Error calculating working days: {e}")
+
+            num_working_days = len(working_dates)
+            
+            # 5. Build summary
+            summary_records = []
+            for emp in all_employees:
+                eid = emp["employee_id"]
+                present_dates = present_dates_map.get(eid, set())
+                # Only count working dates where employee was present
+                valid_present_dates = [d for d in present_dates if d in working_dates]
+                
+                present_count = len(valid_present_dates)
+                absent_count = max(0, num_working_days - present_count)
+                
+                summary_records.append({
+                    "employee_id": eid,
+                    "full_name": emp["full_name"],
+                    "department": emp.get("department") or emp.get("designation") or "General",
+                    "total_present": present_count,
+                    "total_absent": absent_count
+                })
+
+            summary_records.sort(key=lambda x: x["employee_id"])
+            
+            return {
+                "success": True,
+                "records": summary_records,
+                "summary": {
+                    "total_working_days": num_working_days,
+                    "date_from": date_from,
+                    "date_to": date_to
+                }
+            }
+        except Exception as e:
+            print(f"Error in get_employee_summary_report: {e}")
             return {"success": False, "message": str(e), "records": []}
 
 admin_service = AdminService()

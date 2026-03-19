@@ -19,7 +19,7 @@ export const formatTimeHHMM = (value) => {
 export const formatDDMMYYYY = (value) => {
   const date = toDate(value);
   if (!date) return "-";
-  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()}`;
+  return `${pad2(date.getDate())}-${pad2(date.getMonth() + 1)}-${date.getFullYear()}`;
 };
 
 export const formatDDMMYYYYHHMM = (value) => {

@@ -53,8 +53,12 @@ export default function CameraBox({
             sx={{
               position: 'relative',
               display: 'inline-block',
+              width: '100%',
+              maxWidth: 640,
+              aspectRatio: '4 / 3',
               borderRadius: '14px',
               overflow: 'hidden',
+              bgcolor: '#000',
               border: '1px solid',
               borderColor: alpha(theme.palette.primary.main, 0.18),
               boxShadow: '0 10px 24px rgba(0,0,0,0.06)'
@@ -65,20 +69,58 @@ export default function CameraBox({
               autoPlay
               muted
               playsInline
-              style={{ width: '100%', maxWidth: 640, height: 'auto', objectFit: 'cover' }}
+              style={{ 
+                width: '100%', 
+                height: '100%', 
+                objectFit: 'cover',
+                transform: 'scaleX(-1)' // Mirror for natural look
+              }}
             />
-            <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }} />
+            <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, pointerEvents: 'none', width: '100%', height: '100%' }} />
           </Box>
-          <Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <Stack 
+            direction={{ xs: 'column', sm: 'row' }} 
+            spacing={2} 
+            sx={{ mt: 2, justifyContent: 'center' }}
+          >
             {!cameraActive ? (
-              <Button variant="outlined" onClick={onStart} disabled={!canStart} sx={{ fontWeight: 700, width: { xs: '100%', sm: 'auto' } }}>
+              <Button 
+                variant="outlined" 
+                onClick={onStart} 
+                disabled={!canStart} 
+                sx={{ 
+                  fontWeight: 700, 
+                  py: 1.5,
+                  width: { xs: '100%', sm: 'auto' } 
+                }}
+              >
                 Start Camera
               </Button>
             ) : null}
-            <Button variant="contained" color="success" onClick={onMarkEntry} disabled={!canMarkEntry} sx={{ fontWeight: 700, width: { xs: '100%', sm: 'auto' } }}>
+            <Button 
+              variant="contained" 
+              color="success" 
+              onClick={onMarkEntry} 
+              disabled={!canMarkEntry} 
+              sx={{ 
+                fontWeight: 700, 
+                py: 1.5,
+                width: { xs: '100%', sm: 'auto' } 
+              }}
+            >
               Login
             </Button>
-            <Button variant="contained" color="error" onClick={onMarkExit} disabled={!canMarkExit} sx={{ fontWeight: 700, width: { xs: '100%', sm: 'auto' } }}>
+            <Button 
+              variant="contained" 
+              color="error" 
+              onClick={onMarkExit} 
+              disabled={!canMarkExit} 
+              sx={{ 
+                fontWeight: 700, 
+                py: 1.5,
+                width: { xs: '100%', sm: 'auto' } 
+              }}
+            >
               Logout
             </Button>
           </Stack>

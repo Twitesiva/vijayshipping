@@ -21,10 +21,6 @@ export default function FounderAttendanceReports() {
 
     return (
         <div className="space-y-6">
-            <div className="border-b pb-4 mb-4">
-                <h2 className="text-xl font-black text-slate-900 uppercase tracking-wider">Attendance Reports</h2>
-                <p className="text-sm text-slate-500 font-bold">Comprehensive attendance data for all employees.</p>
-            </div>
             <AttendanceReportsModule />
         </div>
     );

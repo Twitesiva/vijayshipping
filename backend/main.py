@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta, timezone as dt_timezone
+# India Standard Time
+IST = dt_timezone(timedelta(hours=5, minutes=30))
 import numpy as np
 import os
 
@@ -46,7 +48,7 @@ async def startup_event():
         # Run at midnight (00:00) every day
         scheduler.add_job(
             scheduled_midnight_auto_logout,
-            CronTrigger(hour=0, minute=0),
+            CronTrigger(hour=23, minute=59, timezone=IST),
             id="midnight_auto_logout",
             name="Midnight Auto-Logout",
             replace_existing=True
@@ -350,6 +352,7 @@ async def detect_face(request: Request):
 @app.get("/api/v1/attendance/check-enrollment/{employee_id}")
 async def check_enrollment_status(employee_id: str):
     """Check if an employee is eligible for face enrollment"""
+    employee_id = employee_id.strip()
     try:
         supabase = get_supabase()
         
@@ -376,7 +379,7 @@ async def enroll_face(request: Request):
     """Enroll a face for an employee"""
     try:
         data = await request.json()
-        employee_id = data.get("employee_id")
+        employee_id = (data.get("employee_id") or "").strip()
         image_data = data.get("image") or (data.get("face_images")[0] if data.get("face_images") else None)
         
         if not employee_id or not image_data:
@@ -453,6 +456,7 @@ async def enroll_face(request: Request):
 @app.delete("/api/v1/admin/delete-face-enrollment/{employee_id}")
 async def delete_face_enrollment(employee_id: str):
     """Deactivate all face enrollments for an employee (manager action)"""
+    employee_id = employee_id.strip()
     try:
         supabase = get_supabase()
 
@@ -649,6 +653,10 @@ async def get_aggregated_report(
     attendance_type: Optional[str] = None
 ):
     return await admin_service.get_aggregated_report(date_from, date_to, employee_id, attendance_type)
+
+@app.get("/api/v1/admin/reports/employee-summary")
+async def get_employee_summary_report(date_from: str, date_to: str):
+    return await admin_service.get_employee_summary_report(date_from, date_to)
 
 @app.get("/api/v1/admin/employees")
 async def get_all_employees():

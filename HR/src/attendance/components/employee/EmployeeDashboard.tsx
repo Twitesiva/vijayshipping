@@ -1,11 +1,13 @@
 'use client';
 
 import * as React from 'react';
-import { Box, Card, CardContent, Grid, Stack, Typography, Chip, TextField, Button, Dialog, DialogTitle, DialogContent, Divider, IconButton, Table, TableHead, TableRow, TableCell, TableBody, MenuItem, DialogActions } from '@mui/material';
+import { Box, Card, CardContent, Grid, Stack, Typography, Chip, TextField, Button, Dialog, DialogTitle, DialogContent, Divider, IconButton, Table, TableHead, TableRow, TableCell, TableBody, MenuItem, DialogActions, alpha } from '@mui/material';
 import { Download as DownloadIcon } from '@mui/icons-material';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import HistoryTable, { HistoryRecord } from './HistoryTable';
+import ModernHistoryTable from './ModernHistoryTable';
+import { ModernSessionLogTable } from '../admin/ModernReportComponents';
 import { apiFetch, API_BASE } from '../../lib/api';
 import { getUser, getToken } from '../../lib/storage';
 import { formatDate, formatTime } from '../../lib/format';
@@ -108,7 +110,7 @@ export default function EmployeeDashboard() {
   }, []);
 
   const lastActionTime = stats?.last_activity
-    ? new Date(stats.last_activity).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+    ? new Date(stats.last_activity).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short', hour12: true })
     : '--';
 
   const now = new Date();
@@ -290,11 +292,24 @@ export default function EmployeeDashboard() {
     setDrillDownOpen(true);
   };
 
+  const handleNavigateDate = (direction: 'next' | 'prev') => {
+    // We need to navigate through the filtered records (aggregated daily records)
+    const aggregated = getFilteredRecords();
+    const currentIndex = aggregated.findIndex((r: any) => r.date === selectedDayInfo?.date);
+    if (currentIndex === -1) return;
+
+    const nextIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+    if (nextIndex >= 0 && nextIndex < aggregated.length) {
+      const nextRecord = aggregated[nextIndex];
+      openDrillDown(nextRecord);
+    }
+  };
+
   const handleDownloadCSV = () => {
     if (filteredRecords.length === 0) return;
     const headers = ["Date", "Login", "Logout", "Duration", "Type"];
     const rows = filteredRecords.map((r: any) => [
-      r.date,
+      formatDate(r.date || r.check_in),
       r.check_in ? formatTime(r.check_in) : '--',
       r.check_out ? formatTime(r.check_out) : (r.check_in ? 'Active' : '--'),
       r.formatted_duration,
@@ -324,7 +339,7 @@ export default function EmployeeDashboard() {
 
     const tableColumn = ["Date", "Login", "Logout", "Duration", "Type"];
     const tableRows = filteredRecords.map((r: any) => [
-      r.date,
+      formatDate(r.date || r.check_in),
       r.check_in ? formatTime(r.check_in) : '--',
       r.check_out ? formatTime(r.check_out) : (r.check_in ? 'Active' : '--'),
       r.formatted_duration,
@@ -368,14 +383,15 @@ export default function EmployeeDashboard() {
       }
 
       if (format === 'csv') {
-        const headers = ["Date", "Login", "Logout", "Duration", "Type", "Location"];
+        const headers = ["Date", "Login", "Logout", "Duration", "Type", "Login Location", "Exit Address"];
         const rows = records.map((r: any) => [
           formatDate(r.check_in),
           formatTime(r.check_in),
           formatTime(r.check_out),
           r.formatted_duration,
           r.is_field_work ? 'Field' : 'Office',
-          r.entry_location_display || 'Office'
+          r.entry_location_display || 'Office',
+          r.exit_location_display || (r.check_out ? 'Office' : '--')
         ]);
 
         const csvContent = "\uFEFF" + [headers, ...rows].map((e: any[]) => e.map((cell: any) => `"${(cell || '').toString().replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -395,14 +411,15 @@ export default function EmployeeDashboard() {
         doc.text(`Employee: ${user?.full_name || user?.username} (ID: ${user?.employee_id})`, 14, 22);
         doc.text(`Period: ${dateFrom} to ${dateTo}`, 14, 28);
 
-        const tableColumn = ["Date", "Login", "Logout", "Duration", "Type", "Location"];
+        const tableColumn = ["Date", "Login", "Logout", "Duration", "Type", "Login Location", "Exit Address"];
         const tableRows = records.map((r: any) => [
           formatDate(r.check_in),
           formatTime(r.check_in),
           formatTime(r.check_out),
           r.formatted_duration,
           r.is_field_work ? 'Field' : 'Office',
-          r.entry_location_display || 'Office'
+          r.entry_location_display || 'Office',
+          r.exit_location_display || (r.check_out ? 'Office' : '--')
         ]);
 
         autoTable(doc, {
@@ -428,79 +445,75 @@ export default function EmployeeDashboard() {
     <Stack spacing={2}>
       {/* Drill-down Dialog */}
       <Dialog open={drillDownOpen} onClose={() => setDrillDownOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ pb: 1 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Box>
-              <Typography variant="h6" fontWeight={800} color="#1e293b">Attendance Details</Typography>
-              <Typography variant="body2" color="#64748b" fontWeight={500}>
-                {selectedDayInfo?.date ? new Date(selectedDayInfo.date).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : ''}
-              </Typography>
+        <DialogTitle sx={{ py: { xs: 2, sm: 3 }, px: { xs: 2, sm: 3 } }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: { xs: 'wrap', sm: 'nowrap' } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flex: 1 }}>
+                        <Box sx={{ flex: 1 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 800, color: '#1e293b', fontSize: { xs: '0.7rem', sm: '0.75rem' } }}>
+                              {selectedDayInfo?.date ? new Date(selectedDayInfo.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase() : ''}
+                            </Typography>
+                        </Box>
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                            <Button 
+                                size="small" 
+                                onClick={() => handleNavigateDate('prev')}
+                                disabled={getFilteredRecords().findIndex((r: any) => r.date === selectedDayInfo?.date) <= 0}
+                                sx={{ 
+                                    minWidth: 44, 
+                                    height: 32,
+                                    px: 1,
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    color: '#598791',
+                                    bgcolor: alpha('#598791', 0.05),
+                                    border: '1px solid',
+                                    borderColor: alpha('#598791', 0.1),
+                                    borderRadius: '8px',
+                                    '&:hover': { bgcolor: alpha('#598791', 0.1) },
+                                    textTransform: 'none'
+                                }}
+                            >
+                                Prev
+                            </Button>
+                            <Button 
+                                size="small" 
+                                onClick={() => handleNavigateDate('next')}
+                                disabled={getFilteredRecords().findIndex((r: any) => r.date === selectedDayInfo?.date) >= getFilteredRecords().length - 1}
+                                sx={{ 
+                                    minWidth: 44, 
+                                    height: 32,
+                                    px: 1,
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    color: '#598791',
+                                    bgcolor: alpha('#598791', 0.05),
+                                    border: '1px solid',
+                                    borderColor: alpha('#598791', 0.1),
+                                    borderRadius: '8px',
+                                    '&:hover': { bgcolor: alpha('#598791', 0.1) },
+                                    textTransform: 'none'
+                                }}
+                            >
+                                Next
+                            </Button>
+                        </Stack>
+                    </Box>
+              </Box>
+
+              <IconButton 
+                autoFocus
+                onClick={() => setDrillDownOpen(false)} 
+                size="small" 
+                sx={{ bgcolor: '#fee2e2', color: '#dc2626', '&:hover': { bgcolor: '#fecaca' }, p: 0.75 }}
+              >
+                <Box sx={{ fontSize: '1rem', p: 0.5 }}>✕</Box>
+              </IconButton>
             </Box>
-            <IconButton onClick={() => setDrillDownOpen(false)} size="small">
-              <Box sx={{ fontSize: '1.2rem' }}>✕</Box>
-            </IconButton>
-          </Box>
         </DialogTitle>
         <Divider />
         <DialogContent sx={{ p: 0 }}>
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ bgcolor: '#f8fafc' }}>
-                <TableCell sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.75rem', py: 1.5 }}>Login</TableCell>
-                <TableCell sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.75rem' }}>Logout</TableCell>
-                <TableCell sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.75rem' }}>Location</TableCell>
-                <TableCell sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.75rem' }}>Type</TableCell>
-                <TableCell align="right" sx={{ fontWeight: 800, color: '#64748b', fontSize: '0.75rem' }}>Duration</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {selectedDaySessions.length > 0 ? selectedDaySessions.map((s: any, i: number) => (
-                <TableRow key={i} sx={{ '&:hover': { bgcolor: '#f1f5f9' } }}>
-                  <TableCell sx={{ fontWeight: 600, color: '#1e293b' }}>
-                    {s.check_in ? new Date(s.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
-                  </TableCell>
-                  <TableCell sx={{ fontWeight: 600, color: '#1e293b' }}>
-                    {s.check_out ? new Date(s.check_out).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : (s.check_in ? 'Active' : '--')}
-                  </TableCell>
-                  <TableCell sx={{ minWidth: 200, py: 1.5 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 500, color: '#475569', whiteSpace: 'normal', lineBreak: 'anywhere' }}>
-                      {s.entry_location_display || s.location_name || s.address || 'Office'}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip 
-                      label={s.is_field_work ? 'Field' : 'Office'} 
-                      size="small" 
-                      sx={{ 
-                        fontWeight: 700, 
-                        fontSize: '0.65rem', 
-                        height: 20,
-                        bgcolor: s.is_field_work ? '#f5f3ff' : '#eff6ff',
-                        color: s.is_field_work ? '#7c3aed' : '#3b82f6'
-                      }} 
-                    />
-                  </TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 800, color: '#598791' }}>
-                    {s.formatted_duration || (s.total_hours ? (() => {
-                      const hours = s.total_hours;
-                      if (hours <= 0) return '--';
-                      const hrs = Math.floor(hours);
-                      const mins = Math.round((hours - hrs) * 60);
-                      if (mins === 0) return `${hrs} hr`;
-                      else if (hrs === 0) return `${mins} min`;
-                      else return `${hrs} hr ${mins} min`;
-                    })() : '--')}
-                  </TableCell>
-                </TableRow>
-              )) : (
-                <TableRow>
-                  <TableCell colSpan={5 as any} align="center" sx={{ py: 3 }}>
-                    <Typography variant="body2" color="text.secondary">No detailed logs found.</Typography>
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          <ModernSessionLogTable sessions={selectedDaySessions} />
         </DialogContent>
         <Box sx={{ p: 2, display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid', borderColor: 'divider' }}>
           <Button 
@@ -515,17 +528,22 @@ export default function EmployeeDashboard() {
       </Dialog>
       <Card sx={{ borderRadius: '16px', border: '1px solid', borderColor: 'divider', boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)', overflow: 'hidden' }}>
         <CardContent sx={{ p: 2.5, background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)' }}>
-          <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
+          <Stack 
+            direction={{ xs: 'column', md: 'row' }} 
+            justifyContent="space-between" 
+            alignItems={{ xs: 'stretch', md: 'center' }} 
+            gap={2}
+          >
             <Box>
-              <Typography variant="h6" sx={{ fontWeight: 800, color: '#1e293b', letterSpacing: '-0.025em' }}>
+              <Typography variant="h6" sx={{ fontWeight: 800, color: '#1e293b', letterSpacing: '-0.025em', fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
                 Dashboard
               </Typography>
-              <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 500, maxWidth: '400px' }}>
+              <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 500, fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
                 Welcome, <Box component="span" sx={{ color: '#598791', fontWeight: 700 }}>{user?.full_name || user?.display_name || user?.username || 'Employee'}</Box>
               </Typography>
             </Box>
 
-            <Stack direction="row" spacing={1.5} alignItems="center">
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ gap: 1 }}>
               <Button
                 variant="outlined"
                 size="small"
@@ -539,7 +557,9 @@ export default function EmployeeDashboard() {
                   px: 2,
                   borderColor: '#598791',
                   color: '#598791',
-                  '&:hover': { borderColor: '#4a727a', bgcolor: 'rgba(89, 135, 145, 0.04)' }
+                  '&:hover': { borderColor: '#4a727a', bgcolor: 'rgba(89, 135, 145, 0.04)' },
+                  fontSize: '0.75rem',
+                  flex: { xs: '100%', sm: 'none' }
                 }}
               >
                 Download
@@ -555,11 +575,12 @@ export default function EmployeeDashboard() {
                   '& .MuiOutlinedInput-root': {
                     borderRadius: '8px',
                     bgcolor: 'white',
-                    fontSize: '0.8rem',
-                    minWidth: 100
+                    fontSize: '0.75rem',
+                    minWidth: { xs: '80px', sm: 100 }
                   },
-                  '& select': { py: 0.75, fontSize: '0.8rem' },
-                  '& label': { fontSize: '0.8rem' }
+                  '& select': { py: 0.75, fontSize: '0.75rem' },
+                  '& label': { fontSize: '0.75rem' },
+                  flex: { xs: 1, sm: 'none' }
                 }}
               >
                 <option value="all">All Types</option>
@@ -577,10 +598,11 @@ export default function EmployeeDashboard() {
                   '& .MuiOutlinedInput-root': {
                     borderRadius: '8px',
                     bgcolor: 'white',
-                    fontSize: '0.8rem',
-                    minWidth: 120
+                    fontSize: '0.75rem',
+                    minWidth: { xs: '100px', sm: 120 }
                   },
-                  '& select': { py: 0.75, fontSize: '0.8rem' }
+                  '& select': { py: 0.75, fontSize: '0.75rem' },
+                  flex: { xs: 1.5, sm: 'none' }
                 }}
               >
                 <option value="today">Today</option>
@@ -590,7 +612,7 @@ export default function EmployeeDashboard() {
               </TextField>
 
               {timePeriod === 'custom' && (
-                <>
+                <Stack direction="row" spacing={1} sx={{ width: { xs: '100%', sm: 'auto' }, mt: { xs: 1, sm: 0 } }}>
                   <TextField
                     type="date"
                     size="small"
@@ -601,9 +623,10 @@ export default function EmployeeDashboard() {
                       '& .MuiOutlinedInput-root': {
                         borderRadius: '8px',
                         bgcolor: 'white',
-                        fontSize: '0.8rem'
+                        fontSize: '0.75rem'
                       },
-                      '& input': { py: 0.75, fontSize: '0.8rem' }
+                      '& input': { py: 0.75, fontSize: '0.75rem' },
+                      flex: 1
                     }}
                   />
                   <TextField
@@ -616,9 +639,10 @@ export default function EmployeeDashboard() {
                       '& .MuiOutlinedInput-root': {
                         borderRadius: '8px',
                         bgcolor: 'white',
-                        fontSize: '0.8rem'
+                        fontSize: '0.75rem'
                       },
-                      '& input': { py: 0.75, fontSize: '0.8rem' }
+                      '& input': { py: 0.75, fontSize: '0.75rem' },
+                      flex: 1
                     }}
                   />
                   <Button
@@ -632,13 +656,13 @@ export default function EmployeeDashboard() {
                       textTransform: 'none',
                       fontWeight: 600,
                       px: 2,
-                      fontSize: '0.8rem',
+                      fontSize: '0.75rem',
                       '&:hover': { bgcolor: '#4a727a' }
                     }}
                   >
                     Filter
                   </Button>
-                </>
+                </Stack>
               )}
             </Stack>
 
@@ -684,7 +708,7 @@ export default function EmployeeDashboard() {
                   boxShadow: isSelected ? `0 10px 15px -3px ${card.accent}33` : '0 1px 3px 0 rgb(0 0 0 / 0.1)',
                   height: '100%',
                   cursor: 'pointer',
-                  bgcolor: 'background.paper',
+                  bgcolor: card.bgColor,
                   transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
                   '&:hover': {
                     borderColor: card.accent,
@@ -696,7 +720,6 @@ export default function EmployeeDashboard() {
                   sx={{
                     p: 2.5,
                     borderRadius: '16px',
-                    bgcolor: card.bgColor,
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'center',
@@ -704,7 +727,6 @@ export default function EmployeeDashboard() {
                     border: `1px solid ${card.accent}20`,
                     transition: 'all 0.2s ease',
                     '&:hover': {
-                      bgcolor: card.bgColor,
                       borderColor: card.accent
                     }
                   }}
@@ -738,13 +760,13 @@ export default function EmployeeDashboard() {
       </Grid>
 
       <Box>
-        <HistoryTable
+        <ModernHistoryTable
           loading={loading}
           records={filteredRecords}
           showLocation={false}
           onViewDetails={openDrillDown}
           enablePagination={selectedFilter === 'all'} 
-          rowsPerPage={6}
+          rowsPerPage={5}
           formatDurationFromHours={(h) => {
             if (!h || h <= 0) return '--';
             const hrs = Math.floor(h);

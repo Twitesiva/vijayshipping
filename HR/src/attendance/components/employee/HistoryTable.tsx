@@ -27,15 +27,19 @@ import { formatDate, formatTime } from '../../lib/format';
 export type HistoryRecord = {
   check_in?: string;
   check_out?: string;
-  location_name?: string;
-  zone_name?: string;
-  formatted_duration?: string;
-  total_hours?: number;
-  status?: string;
-  attendance_type?: string;
-  is_field_work?: boolean;
+  entry_location_display?: string;
+  exit_location_display?: string;
   display_date?: string;
   date?: string;
+  is_field_work?: boolean;
+  total_hours?: string | number;
+  status?: string;
+  entry_location_name?: string;
+  location_name?: string;
+  zone_name?: string;
+  exit_location_name?: string;
+  formatted_duration?: string;
+  attendance_type?: string;
 };
 
 type HistoryTableProps = {
@@ -112,7 +116,8 @@ export default function HistoryTable({
               const entryDate = isAbsent ? record.display_date || '-' : formatDate(record.check_in);
               const entryTime = isAbsent ? '--' : formatTime(record.check_in);
               const exitTime = isAbsent ? '--' : (record.check_out ? formatTime(record.check_out) : '-');
-              const location = isAbsent ? '--' : (record.location_name || record.zone_name || 'Unknown');
+              const entryLoc = isAbsent ? '--' : (record.entry_location_display || record.location_name || record.zone_name || 'Unknown');
+              const exitLoc = isAbsent ? '--' : (record.exit_location_display || (record.check_out ? 'Office' : '--'));
               const hours = isAbsent ? '--' : (
                 record.formatted_duration ||
                 (record.check_in && record.check_out
@@ -154,6 +159,16 @@ export default function HistoryTable({
                         <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>
                           Logout: {exitTime}
                         </Typography>
+                        {showLocation && (
+                          <Box sx={{ mt: 0.5 }}>
+                            <Typography variant="caption" sx={{ color: '#0ea5e9', fontWeight: 600, display: 'block' }}>
+                              In: {entryLoc}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: '#0ea5e9', fontWeight: 600, display: 'block' }}>
+                              Out: {exitLoc}
+                            </Typography>
+                          </Box>
+                        )}
                       </Box>
                       {onViewDetails && !isAbsent && (
                         <IconButton size="small" onClick={() => onViewDetails(record)} sx={{ color: '#598791' }}>
@@ -186,12 +201,6 @@ export default function HistoryTable({
                         {workType}
                       </Typography>
                     </Box>
-                    {showLocation && (
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Location</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 700, color: '#0ea5e9', fontSize: '0.7rem' }}>{location}</Typography>
-                      </Box>
-                    )}
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                       <Typography variant="body2" sx={{ color: '#64748b', fontWeight: 600 }}>Total Time</Typography>
                       <Typography variant="body2" sx={{ fontWeight: 800, color: '#598791' }}>{hours}</Typography>
@@ -209,7 +218,12 @@ export default function HistoryTable({
                 <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem', py: 2.5 }}>Date</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Login</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Logout</TableCell>
-                  {showLocation && <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Location</TableCell>}
+                  {showLocation && (
+                    <>
+                      <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Login Location</TableCell>
+                      <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Logout Location</TableCell>
+                    </>
+                  )}
                   <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Type</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Duration</TableCell>
                   <TableCell sx={{ fontWeight: 800, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>Status</TableCell>
@@ -225,7 +239,8 @@ export default function HistoryTable({
                   const entryDate = isAbsent ? record.display_date || '-' : formatDate(record.check_in);
                   const entryTime = isAbsent ? '--' : formatTime(record.check_in);
                   const exitTime = isAbsent ? '--' : (record.check_out ? formatTime(record.check_out) : '-');
-                  const location = isAbsent ? '--' : (record.location_name || record.zone_name || 'Unknown');
+                  const entryLoc = isAbsent ? '--' : (record.entry_location_display || record.location_name || record.zone_name || 'Unknown');
+                  const exitLoc = isAbsent ? '--' : (record.exit_location_display || (record.check_out ? 'Office' : '--'));
                   const hours = isAbsent ? '--' : (
                     record.formatted_duration ||
                     (record.check_in && record.check_out
@@ -251,7 +266,12 @@ export default function HistoryTable({
                       <TableCell sx={{ fontWeight: 700, color: '#1e293b' }}>{entryDate}</TableCell>
                       <TableCell sx={{ color: '#475569', fontWeight: 600 }}>{entryTime}</TableCell>
                       <TableCell sx={{ color: '#475569', fontWeight: 600 }}>{exitTime}</TableCell>
-                      {showLocation && <TableCell sx={{ color: '#475569', fontWeight: 600, fontSize: '0.75rem' }}>{location}</TableCell>}
+                      {showLocation && (
+                        <>
+                          <TableCell sx={{ color: '#475569', fontWeight: 600, fontSize: '0.75rem', maxWidth: 150 }}>{entryLoc}</TableCell>
+                          <TableCell sx={{ color: '#475569', fontWeight: 600, fontSize: '0.75rem', maxWidth: 150 }}>{exitLoc}</TableCell>
+                        </>
+                      )}
                       <TableCell>
                         <Chip
                           size="small"

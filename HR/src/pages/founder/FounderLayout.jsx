@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, LogOut, UserRound, Menu, ClipboardList } from "lucide-react";
+import { LayoutDashboard, LogOut, UserRound, Menu, ClipboardList, FileBarChart } from "lucide-react";
 
 const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
 
@@ -122,7 +122,7 @@ export default function FounderLayout() {
 
                         <SideItem
                             to="/founder-dashboard/reports"
-                            icon={ClipboardList}
+                            icon={FileBarChart}
                             label="Reports"
                             isCollapsed={!isSidebarOpen}
                         />

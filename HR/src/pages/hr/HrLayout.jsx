@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabaseClient";
 
-import { LayoutDashboard, ClipboardList, LogOut, UserRound, Menu, Users, ChevronDown, ChevronRight } from "lucide-react";
+import { LayoutDashboard, ClipboardList, LogOut, UserRound, Menu, Users, ChevronDown, ChevronRight, ScanFace, FileBarChart, ClipboardCheck } from "lucide-react";
 
 const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
 
@@ -176,7 +176,7 @@ export default function HrLayout() {
             {pathname.startsWith("/manager-dashboard") && (
               <SideItem
                 to="/manager-dashboard/face-enroll"
-                icon={Users}
+                icon={ScanFace}
                 label="Face Enroll"
                 isCollapsed={!isSidebarOpen}
               />
@@ -186,7 +186,7 @@ export default function HrLayout() {
             {pathname.startsWith("/manager-dashboard") && (
               <SideItem
                 to="/manager-dashboard/attendance/reports"
-                icon={ClipboardList}
+                icon={FileBarChart}
                 label="Reports"
                 isCollapsed={!isSidebarOpen}
               />
@@ -202,7 +202,7 @@ export default function HrLayout() {
                 className={`w-full flex items-center ${!isSidebarOpen ? "justify-center" : "justify-between"} px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-200 text-gray-700 hover:bg-[#e6ffff] hover:text-[#009999] ${(pathname.includes("/attendance/")) ? 'bg-[#e6ffff] text-[#009999]' : ''}`}
               >
                 <div className={`flex items-center ${!isSidebarOpen ? "justify-center" : "gap-3"}`}>
-                  <ClipboardList size={18} className="shrink-0" />
+                  <ClipboardCheck size={18} className="shrink-0" />
                   {isSidebarOpen && <span className="truncate">Attendance</span>}
                 </div>
                 {isSidebarOpen && (
@@ -284,7 +284,7 @@ export default function HrLayout() {
                   pathname.startsWith("/founder-dashboard") ? "/founder-dashboard/face-enroll" :
                     "/hr-dashboard/face-enroll"
                 }
-                icon={Users}
+                icon={ScanFace}
                 label="Face Enroll"
                 isCollapsed={!isSidebarOpen}
               />

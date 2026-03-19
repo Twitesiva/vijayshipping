@@ -6,6 +6,7 @@ import { useLocation } from 'react-router-dom';
 import CameraBox from './CameraBox';
 import StatusCards from './StatusCards';
 import HistoryTable from './HistoryTable';
+import ModernHistoryTable from './ModernHistoryTable';
 import Alerts, { AlertState } from '../../components/common/Alerts';
 import { API_BASE, apiFetch } from '../../lib/api';
 import { getToken, getUser, setUser } from '../../lib/storage';
@@ -616,7 +617,7 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
   const todayPermissionHours = todayRecords.reduce((sum, record) => sum + Number(record.permission_hours || 0), 0);
 
   const latestRecord = historyRecords[0];
-  const lastEntryTime = latestRecord?.check_in ? new Date(latestRecord.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--';
+  const lastEntryTime = latestRecord?.check_in ? new Date(latestRecord.check_in).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : '--';
 
   return (
     <Stack spacing={3}>
@@ -650,11 +651,11 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
                   borderColor: 'divider',
                   boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)',
                   height: '100%',
-                  bgcolor: 'background.paper',
+                  background: item.bg,
                   transition: 'transform 0.2s',
                   '&:hover': { transform: 'translateY(-2px)' }
                 }}>
-                  <CardContent sx={{ p: 2.5, background: item.bg }}>
+                  <CardContent sx={{ p: 2.5 }}>
                     <Typography variant="overline" sx={{ color: item.accent, fontWeight: 900, mb: 0.5, letterSpacing: '0.05em' }}>
                       {item.label}
                     </Typography>
@@ -724,12 +725,12 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
         ]}
       />
       {showHistory && (
-        <HistoryTable
+        <ModernHistoryTable
           loading={historyLoading}
-          records={pathname?.startsWith('/employee-dashboard/dashboard') ? dashboardHistoryRecords : historyRecords}
-          showLocation={true}
+          records={pathname?.startsWith('/employee-dashboard/dashboard') ? dashboardHistoryRecords : historyRecords.slice(0, 5)}
+          showLocation={false}
           enablePagination={pathname?.startsWith('/employee-dashboard/dashboard')}
-          rowsPerPage={6}
+          rowsPerPage={5}
           formatDurationFromHours={(h) => {
             if (!h || h <= 0) return '--';
             const hrs = Math.floor(h);

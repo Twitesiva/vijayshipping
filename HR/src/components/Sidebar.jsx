@@ -11,6 +11,10 @@ import {
   ChevronRight,
   LogOut,
   Book,
+  CalendarCheck,
+  Palmtree,
+  Banknote,
+  Files,
 } from "lucide-react";
 
 const DOCS_AUTH_KEY = "HRMSS_DOCS_AUTH";
@@ -136,7 +140,7 @@ const Sidebar = ({ isOpen = true, isMobileOpen = false }) => {
               : "text-gray-700 hover:bg-[#00cccc] hover:text-[#00cccc]"
             }`}
         >
-          <CalendarDays size={18} />
+          <CalendarCheck size={18} />
           {isOpen && <span>Leave Management</span>}
         </NavLink>
 
@@ -149,7 +153,7 @@ const Sidebar = ({ isOpen = true, isMobileOpen = false }) => {
               : "text-gray-700 hover:bg-[#00cccc] hover:text-[#00cccc]"
             }`}
         >
-          <CalendarDays size={18} />
+          <Palmtree size={18} />
           {isOpen && <span>Holiday Calendar</span>}
         </NavLink>
 
@@ -162,7 +166,7 @@ const Sidebar = ({ isOpen = true, isMobileOpen = false }) => {
               : "text-gray-700 hover:bg-[#00cccc] hover:text-[#00cccc]"
             }`}
         >
-          <FileText size={18} />
+          <Banknote size={18} />
           {isOpen && <span>Payslips</span>}
         </NavLink>
 
@@ -175,7 +179,7 @@ const Sidebar = ({ isOpen = true, isMobileOpen = false }) => {
               : "text-gray-700 hover:bg-[#00cccc] hover:text-[#00cccc]"
             }`}
         >
-          <FileText size={18} />
+          <Files size={18} />
           {isOpen && <span>Documents</span>}
         </NavLink>
 

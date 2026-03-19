@@ -151,6 +151,11 @@ export default function Employees() {
     exitDate: "",
     workStatus: "Inactive",
   });
+
+  // 📄 PAGINATION STATE
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
+
   useEffect(() => {
     if (isAddModalOpen && addStep === "ACTIVE" && !newEmployee.employeeId) {
       const nextId = generateEmployeeId(employees, newEmployee.idSeries);
@@ -362,39 +367,64 @@ export default function Employees() {
       setResetPwValue("");
       setShowResetPw(false);
     } catch (err) {
-      console.error(err);
-      alert(err?.message || "Failed to reset password");
+      console.error("[HrProfile] Caught error in handleSaveEdit:", err);
+      alert("Error updating profile.");
     } finally {
       setResetPwSaving(false);
+    }
+  };
+
+  const handleDeleteEmployee = async (profileToDelete) => {
+    const eid = profileToDelete.employee_id;
+    if (!eid) {
+      alert("Cannot delete: Employee ID missing.");
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete employee ${profileToDelete.full_name} (${eid})? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      // Assuming setSaving is a state setter for a loading indicator
+      // If not defined, you might need to add it or remove this line.
+      // setSaving(true); 
+      const API_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+      const response = await fetch(`${API_URL}/api/v1/admin/delete-employee/${eid}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Failed to delete employee: ${errorData.detail || errorData.message || response.statusText}`);
+      }
+
+      setEmployees((prev) => prev.filter((emp) => emp.employee_id !== eid && emp.id !== eid));
+      setIsEditModalOpen(false);
+      setSelectedEmployee(null);
+      alert(`Employee ${profileToDelete.full_name} deleted successfully.`);
+    } catch (err) {
+      console.error("[Employees] Error deleting employee:", err);
+      alert("Error deleting employee: " + err.message);
+    } finally {
+      // setSaving(false);
     }
   };
 
   const mapEmployeeToProfile = (emp) => {
     if (!emp) return null;
     return {
-      name: emp.name || "",
+      ...emp,
+      full_name: emp.name || "",
+      employee_id: emp.id || "",
       id: emp.id || "",
-      username: emp.username || "",
+      official_email: emp.email || "",
+      personal_email: emp.email || "",
+      mobile_number: emp.phone || "",
+      dob: emp.dob || "",
+      gender: emp.gender || "",
       designation: emp.designation || "",
-      avatar: emp.avatar || "",
-      status: emp.status || "",
-      work_status: emp.workStatus || "Active",
-      exit_date: emp.exitDate || "",
-      reason_for_leave: emp.reasonForLeave || "",
-      job: {
-        employeeId: emp.id || "",
-        designation: emp.designation || "",
-        department: emp.department || "",
-        joiningDate: emp.joinDate || "",
-        employeeType: emp.employeeType || "",
-        manager: emp.reportingManager || "",
-      },
-      personal: {
-        dob: emp.dob || "",
-        gender: emp.gender || "",
-        mobileNumber: emp.phone || "",
-        personalEmail: emp.email || "",
-      }
+      join_date: emp.joinDate || "",
     };
   };
 
@@ -411,31 +441,32 @@ export default function Employees() {
         }
       }
 
-      const job = up.job || {};
-      const personal = up.personal || {};
+      if (!up.dob || String(up.dob).trim() === "") {
+        alert("Date of Birth is required.");
+        return;
+      }
 
       const payload = {
-        full_name: up.name || null,
+        full_name: up.full_name || up.name || null,
         username: up.username || null,
         designation: up.designation || null,
-        department: job.department || null,
-        location: job.location || null,
-        join_date: job.joiningDate || null,
-        employee_type: job.employeeType || null,
-        reporting_manager: job.manager || null,
-        gender: personal.gender || null,
-        dob: personal.dob || null,
-        mobile_number: personal.mobileNumber || null,
-        email: up.email || personal.officialEmail || personal.personalEmail || null,
+        department: up.department || null,
+        location: up.location || null,
+        join_date: up.join_date || up.joinDate || null,
+        employee_type: up.employee_type || up.employeeType || null,
+        reporting_manager: up.reporting_manager || up.reportingManager || up.manager || null,
+        gender: up.gender || null,
+        dob: up.dob || null,
+        phone: up.mobile_number || up.phone || null,
+        email: up.official_email || up.personal_email || up.email || null,
         status: isMarkingInactive ? "Inactive" : (up.status || selectedEmployee?.status || null),
         work_status: nextWorkStatus,
         exit_date: isMarkingInactive ? (up.exit_date || null) : null,
         reason_for_leave: isMarkingInactive ? (up.reason_for_leave || null) : null,
       };
 
-      console.log("[handleSaveEdit] Saving payload:", payload);
+      console.log("[handleSaveEdit] Final payload for backend:", payload);
 
-      // Use backend API instead of direct Supabase board update
       const API_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
       const response = await fetch(`${API_URL}/api/v1/admin/employees/${up.id}`, {
         method: "PUT",
@@ -444,6 +475,8 @@ export default function Employees() {
       });
 
       const result = await response.json();
+      console.log("[handleSaveEdit] Backend response:", result);
+
       if (!response.ok || !result.success) {
         throw new Error(result.message || "Failed to update employee");
       }
@@ -453,19 +486,19 @@ export default function Employees() {
         if (emp.id === up.id) {
           return {
             ...emp,
-            name: payload.full_name,
-            username: payload.username,
-            designation: payload.designation,
-            department: payload.department,
-            location: payload.location,
-            joinDate: payload.join_date,
-            employeeType: payload.employee_type,
-            status: payload.status,
-            reportingManager: payload.reporting_manager,
-            gender: payload.gender,
-            dob: payload.dob,
-            phone: payload.mobile_number,
-            email: payload.email,
+            name: payload.full_name || emp.name,
+            username: payload.username || emp.username,
+            designation: payload.designation || emp.designation,
+            department: payload.department || emp.department,
+            location: payload.location || emp.location,
+            joinDate: payload.join_date || emp.joinDate,
+            employeeType: payload.employee_type || emp.employeeType,
+            status: payload.status || emp.status,
+            reportingManager: payload.reporting_manager || emp.reportingManager,
+            gender: payload.gender || emp.gender,
+            dob: payload.dob || emp.dob,
+            phone: payload.phone || emp.phone,
+            email: payload.email || emp.email,
             workStatus: nextWorkStatus,
             exitDate: payload.exit_date,
             reasonForLeave: payload.reason_for_leave,
@@ -477,19 +510,19 @@ export default function Employees() {
       // Update selected employee for the View modal
       setSelectedEmployee(prev => ({
         ...prev,
-        name: payload.full_name,
-        username: payload.username,
-        designation: payload.designation,
-        department: payload.department,
-        location: payload.location,
-        joinDate: payload.join_date,
-        employeeType: payload.employee_type,
-        status: payload.status,
-        reportingManager: payload.reporting_manager,
-        gender: payload.gender,
-        dob: payload.dob,
-        phone: payload.mobile_number,
-        email: payload.email,
+        name: payload.full_name || prev.name,
+        username: payload.username || prev.username,
+        designation: payload.designation || prev.designation,
+        department: payload.department || prev.department,
+        location: payload.location || prev.location,
+        joinDate: payload.join_date || prev.joinDate,
+        employeeType: payload.employee_type || prev.employeeType,
+        status: payload.status || prev.status,
+        reportingManager: payload.reporting_manager || prev.reportingManager,
+        gender: payload.gender || prev.gender,
+        dob: payload.dob || prev.dob,
+        phone: payload.phone || prev.phone,
+        email: payload.email || prev.email,
         workStatus: nextWorkStatus,
         exitDate: payload.exit_date,
         reasonForLeave: payload.reason_for_leave,
@@ -605,25 +638,16 @@ export default function Employees() {
         if (credErr) throw credErr;
 
         setEmployees((prev) => [
+          ...prev,
           {
-            id: inserted.employee_id,
-            username: inserted.username || "",
-            name: inserted.full_name,
-            designation: inserted.designation || "",
-            department: inserted.department || "",
-            email: inserted.email || "",
-            phone: inserted.phone || "",
-            location: inserted.location || "",
-            joinDate: inserted.join_date || "",
-            employeeType: inserted.employee_type || "",
-            status: inserted.status || "",
-            avatar: inserted.avatar || "",
-            gender: inserted.gender || "",
-            dob: inserted.dob || "",
-            reportingManager: inserted.reporting_manager || "",
+            ...inserted,
+            id: inserted.employee_id, // Map employee_id to id for consistency
+            name: inserted.full_name, // Map full_name to name
+            joinDate: inserted.join_date,
+            employeeType: inserted.employee_type,
+            reportingManager: inserted.reporting_manager,
             workStatus: inserted.work_status || "Active",
           },
-          ...prev,
         ]);
       } catch (err) {
         console.error(err);
@@ -633,6 +657,7 @@ export default function Employees() {
     } else {
       // local fallback
       setEmployees((prev) => [
+        ...prev,
         {
           id: employeeId,
           name: fullName,
@@ -650,7 +675,6 @@ export default function Employees() {
           avatar: "",
           workStatus: "Active",
         },
-        ...prev,
       ]);
     }
 
@@ -759,6 +783,7 @@ export default function Employees() {
 
         // Add to local state
         setEmployees(prev => [
+          ...prev,
           {
             id: resignedEmployee.employeeId,
             name: payload.full_name,
@@ -779,7 +804,6 @@ export default function Employees() {
             reasonForLeave: payload.reason_for_leave,
             documentUrl: payload.document_url,
           },
-          ...prev
         ]);
 
         alert("Resigned employee details added successfully.");
@@ -806,6 +830,7 @@ export default function Employees() {
     } else {
       // Local fallback
       setEmployees(prev => [
+        ...prev,
         {
           id: resignedEmployee.employeeId,
           name: resignedEmployee.fullName.trim(),
@@ -823,7 +848,6 @@ export default function Employees() {
           reportingManager: "",
           workStatus: "Inactive",
         },
-        ...prev
       ]);
       setIsAddModalOpen(false);
       setAddStep("CHOICE");
@@ -854,8 +878,20 @@ export default function Employees() {
       const matchTab = viewTab === "active" ? !isInactive : isInactive;
 
       return matchSearch && matchDepartment && matchEmployeeType && matchTab;
-    });
+    }).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   }, [employees, search, departmentFilter, employeeTypeFilter, viewTab]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, departmentFilter, employeeTypeFilter, viewTab]);
+
+  const paginatedEmployees = useMemo(() => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredEmployees.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredEmployees, currentPage]);
+
+  const totalPages = Math.ceil(filteredEmployees.length / ITEMS_PER_PAGE);
 
   // ✅ Modal shows ONLY fields that are part of Add form / DB fields you set
   // ✅ DOB + Phone removed
@@ -972,7 +1008,7 @@ export default function Employees() {
           </thead>
 
           <tbody className="divide-y divide-slate-100">
-            {filteredEmployees.map((emp) => (
+            {paginatedEmployees.map((emp) => (
               <tr
                 key={emp.id}
                 className="hover:bg-slate-50 cursor-pointer"
@@ -1009,6 +1045,51 @@ export default function Employees() {
             ))}
           </tbody>
         </table>
+
+        {/* 📄 PAGINATION CONTROLS */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-slate-100 bg-white px-4 py-3 sm:px-6">
+            <div className="flex flex-1 justify-between sm:hidden">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="relative inline-flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="relative ml-3 inline-flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+            <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-end">
+              <div>
+                <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="relative inline-flex items-center rounded-l-md px-4 py-2 text-sm font-bold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-[#598791] hover:text-white focus:z-20 focus:outline-offset-0 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-700 transition-all"
+                  >
+                    Previous
+                  </button>
+                  <div className="relative inline-flex items-center px-4 py-2 text-sm font-black text-[#598791] ring-1 ring-inset ring-slate-300 bg-[#598791]/5">
+                    Page {currentPage} of {totalPages}
+                  </div>
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="relative inline-flex items-center rounded-r-md px-4 py-2 text-sm font-bold text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-[#598791] hover:text-white focus:z-20 focus:outline-offset-0 disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-700 transition-all"
+                  >
+                    Next
+                  </button>
+                </nav>
+              </div>
+            </div>
+          </div>
+        )}
 
         {filteredEmployees.length === 0 && (
           <div className="p-6 text-center text-sm text-slate-500">
@@ -1584,11 +1665,11 @@ export default function Employees() {
             profile={mapEmployeeToProfile(selectedEmployee)}
             onClose={() => setIsEditModalOpen(false)}
             onSave={handleSaveEdit}
+            onDelete={handleDeleteEmployee}
+            simplified={true}
           />
         )
       }
     </div>
   );
 }
-
-

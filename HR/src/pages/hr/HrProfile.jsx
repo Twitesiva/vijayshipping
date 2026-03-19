@@ -1,24 +1,28 @@
 import { useEffect, useState } from "react";
 import {
-  MapPin,
-  IdCard,
-  Briefcase,
-  Phone,
   Pencil,
-  X,
   Camera,
-  Mail,
-  GraduationCap,
-  Building2,
+  User,
   HeartPulse,
+  Users,
+  CalendarDays,
+  Mail,
+  Phone,
+  MapPin,
+  Hash,
+  X,
+  Save,
+  Loader2
 } from "lucide-react";
+import ImageCropper from "../../components/ImageCropper.jsx";
+import { GhostButton, Modal } from "../employee/shared/ui.jsx";
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient.js";
-import EditProfileModal from "./HrEditModal.jsx";
 import { formatDDMMYYYY } from "../../lib/dateUtils.js";
 
-/* ========================================================= */
-/* ======================= HELPERS ========================= */
-/* ========================================================= */
+// Replaced with MyProfile logic - EditProfileModal removed
+// formatDDMMYYYY not needed - inline MyProfile
+
+/* ================= HELPERS ================= */
 
 const AUTH_KEY = "HRMSS_AUTH_SESSION";
 const HR_CACHE_KEY = (userId) => `hrmss.profile.cache.hr.${userId || "unknown"}`;
@@ -39,145 +43,33 @@ function readAuth() {
   return { userId, email, fullName };
 }
 
-const isDmy = (value) => /^\d{2}\/\d{2}\/\d{4}$/.test(value);
-
 const formatDateValue = (value) => {
   const raw = String(value || "").trim();
   if (!raw) return "-";
-  if (isDmy(raw)) return raw;
-  const formatted = formatDDMMYYYY(raw);
-  return formatted === "-" ? raw : formatted;
+  return formatDDMMYYYY(raw);
 };
 
+// Map DB row to UI profile object
 function mapDbToProfile(data, fallback = {}) {
   if (!data) return null;
-
+  console.log("[HrProfile] Mapping DB data:", data);
   return {
-    name: data.full_name || fallback.fullName || "",
-    id: data.employee_id || fallback.userId || "",
-    avatar: data.avatar_url || "",
-
-    personal: {
-      dob: data.dob || "",
-      gender: data.gender || "",
-      maritalStatus: data.marital_status || "",
-      bloodGroup: data.blood_group || "",
-      personalEmail: data.personal_email || data.email || fallback.email || "",
-      officialEmail: data.official_email || "",
-      mobileNumber: data.mobile_number || data.phone || "",
-      alternateContactNumber: data.alternate_contact_number || "",
-      currentAddress: data.current_address || "",
-      permanentAddress: data.permanent_address || "",
-      panId: data.pan_id || "",
-      authorId: data.author_id || "",
-    },
-
-    job: {
-      employeeId: data.employee_id || fallback.userId || "",
-      title: data.designation || "Manager",
-      department: data.department || "Management",
-      location: data.location || "",
-      workMode: data.work_mode || "Office",
-    },
-
-    education: Array.isArray(data.education) ? data.education : [],
-    experience: Array.isArray(data.experience) ? data.experience : [],
-
-    skills: {
-      primarySkills: data.primary_skills || "",
-      secondarySkills: data.secondary_skills || "",
-      toolsTechnologies: data.tools_technologies || "",
-    },
-
-    bank: {
-      accountHolderName: data.account_holder_name || "",
-      bankName: data.bank_name || "",
-      accountNumber: data.account_number || "",
-      ifscCode: data.ifsc_code || "",
-      branch: data.branch || "",
-    },
-
-    emergencyContacts: data.emergency_name
-      ? [
-        {
-          name: data.emergency_name || "",
-          relation: data.emergency_relationship || "",
-          phone: data.emergency_contact_number || "",
-        },
-      ]
-      : [],
-
-    idProofs: [],
-
-    // keep uid for save
-    __userId: String(data.employee_id || fallback.userId || "").trim(),
+    full_name: data.full_name || data.name || fallback.fullName || "",
+    employee_id: data.employee_id || data.userId || fallback.userId || "",
+    avatar_url: data.avatar_url || "",
+    dob: data.dob || "",
+    gender: data.gender || "",
+    blood_group: data.blood_group || "",
+    marital_status: data.marital_status || "",
+    personal_email: data.personal_email || "",
+    official_email: data.official_email || data.email || fallback.email || "",
+    current_address: data.current_address || "",
+    emergency_name: data.emergency_name || "",
+    emergency_contact_number: data.emergency_contact_number || "",
+    __userId: data.employee_id
   };
 }
 
-function profileToDbPayload(profile, userId, fallback = {}) {
-  const p = profile || {};
-  const personal = p.personal || {};
-  const job = p.job || {};
-  const skills = p.skills || {};
-  const bank = p.bank || {};
-  const e0 =
-    Array.isArray(p.emergencyContacts) && p.emergencyContacts.length
-      ? p.emergencyContacts[0]
-      : null;
-
-  return {
-    role: "hr",
-
-    full_name: p.name || fallback.fullName || null,
-    email: personal.personalEmail || fallback.email || null,
-    phone: personal.mobileNumber || null,
-
-    employee_id: p.id || job.employeeId || userId || null,
-    avatar_url: p.avatar || null,
-
-    dob: personal.dob || null,
-    gender: personal.gender || null,
-    marital_status: personal.maritalStatus || null,
-    blood_group: personal.bloodGroup || null,
-
-    personal_email: personal.personalEmail || null,
-    official_email: personal.officialEmail || null,
-    mobile_number: personal.mobileNumber || null,
-    alternate_contact_number: personal.alternateContactNumber || null,
-
-    current_address: personal.currentAddress || null,
-    permanent_address: personal.permanentAddress || null,
-    pan_id: personal.panId || null,
-    author_id: personal.authorId || null,
-
-    location: job.location || null,
-    department: job.department || null,
-    designation: job.title || null,
-    work_mode: job.workMode || null,
-
-    education: Array.isArray(p.education) ? p.education : [],
-    experience: Array.isArray(p.experience) ? p.experience : [],
-
-    primary_skills: skills.primarySkills || null,
-    secondary_skills: skills.secondarySkills || null,
-    tools_technologies: skills.toolsTechnologies || null,
-
-    account_holder_name: bank.accountHolderName || null,
-    bank_name: bank.bankName || null,
-    account_number: bank.accountNumber || null,
-    ifsc_code: bank.ifscCode || null,
-    branch: bank.branch || null,
-
-    emergency_name: e0?.name || null,
-    emergency_relationship: e0?.relation || null,
-    emergency_contact_number: e0?.phone || null,
-
-    profile_completed: true,
-    updated_at: new Date().toISOString(),
-  };
-}
-
-// ? upload helper shared with other areas (keeping bucket names in sync)
 async function uploadAvatar({ folderKey, file }) {
   if (!file) return "";
   const cleanName = (file.name || "avatar").replace(/\s+/g, "-");
@@ -193,33 +85,27 @@ async function uploadAvatar({ folderKey, file }) {
   return data?.publicUrl || "";
 }
 
-/* ========================================================= */
-/* ======================= MAIN ============================ */
-/* ========================================================= */
-
 export default function HrProfile() {
   const auth = readAuth();
   const cacheKey = HR_CACHE_KEY(auth.userId);
 
   const [profile, setProfile] = useState(() => {
-    // Immediate fallback to auth session data
-    // Only use "User" if literally nothing else (name or email) is found.
     const sessionName = (auth.fullName || "").trim();
     const displayName = (sessionName && sessionName.toLowerCase() !== "user") ? sessionName : "";
-
     return {
-      name: displayName || "User",
-      id: auth.userId || "ID",
-      job: { title: "Management", department: "Operations" }
+      full_name: displayName || "User",
+      employee_id: auth.userId || "ID"
     };
   });
+
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [avatarUploading, setAvatarUploading] = useState(false);
-
   const [editProfile, setEditProfile] = useState(false);
+  const [photoMenu, setPhotoMenu] = useState(false);
+  const [showCropper, setShowCropper] = useState(false);
+  const [tempFile, setTempFile] = useState(null);
 
-  /* ================= FETCH HR PROFILE ================= */
   useEffect(() => {
     let mounted = true;
 
@@ -230,100 +116,76 @@ export default function HrProfile() {
 
         const { userId } = auth;
         if (!userId) {
-          setErr("HR session not found. Please login again.");
+          console.warn("[HrProfile] No userId in auth session");
+          setErr("HR session not found.");
           setProfile(null);
           return;
         }
 
-        // ✅ 1) cache first (Sign-In page save pannina details)
         const cached = safeJsonParse(localStorage.getItem(cacheKey));
         if (cached && mounted) {
+          console.log("[HrProfile] Loading from cache:", cached);
           setProfile(cached);
         }
 
-        // ✅ 2) DB load
-        if (!isSupabaseConfigured) {
-          if (!cached) setErr("Supabase env missing. Showing cached/local data only.");
-          if (!cached && mounted) setProfile(null);
-          return;
-        }
+        if (!isSupabaseConfigured) return;
 
-        // Query 'employees' table for the latest full_name and designation
+        console.log("[HrProfile] Fetching from DB for:", userId);
         let { data, error } = await supabase
-          .from("employees")
-          .select("employee_id, full_name, designation, email, phone, location, gender, department, join_date")
+          .from("hrms_employee_profile")
+          .select("*")
           .eq("employee_id", userId)
           .maybeSingle();
 
-        // If not found in employees by ID, try email
-        if (!data && email) {
-          const { data: emailData } = await supabase
+        if (error) {
+          console.error("[HrProfile] DB error (hrms_employee_profile):", error);
+          throw error;
+        }
+
+        // Fallback to employees table if hrms_employee_profile is empty
+        if (!data || Object.keys(data).length < 5) { // If very minimal, check employees table
+          console.log("[HrProfile] No rich profile found, checking employees table...");
+          const { data: empData, error: empErr } = await supabase
             .from("employees")
-            .select("employee_id, full_name, designation, email, phone, location, gender, department, join_date")
-            .eq("email", email)
+            .select("*")
+            .eq("employee_id", userId)
             .maybeSingle();
-          if (emailData) data = emailData;
+
+          if (empErr) console.error("[HrProfile] DB error (employees):", empErr);
+          if (empData) {
+            console.log("[HrProfile] Found data in employees table:", empData);
+            // Merge if some data already in 'data'
+            data = data ? { ...empData, ...data } : empData;
+          }
         }
 
-// employees table is primary source - fallback removed
-        // (data already from employees or null)
-
-
-        // Final fallback for name mapping
-        if (data) {
-          data.full_name = data.full_name || data.name || auth.fullName;
-          data.name = data.full_name;
-        }
-
-        if (error) throw error;
-
-        // ✅ row exists
         if (data) {
           const mapped = mapDbToProfile(data, auth);
+          console.log("[HrProfile] Mapped profile:", mapped);
           localStorage.setItem(cacheKey, JSON.stringify(mapped));
           if (mounted) setProfile(mapped);
           return;
         }
 
-        // ✅ 3) row NOT exists -> auto create (so "HR Profile not found" never shows)
+        // Auto create minimal if data not found
         const minimal = {
-          name: auth.fullName || "HR",
-          id: userId,
-          avatar: "",
-          personal: {
-            dob: "",
-            gender: "",
-            maritalStatus: "",
-            bloodGroup: "",
-            personalEmail: auth.email || "",
-            officialEmail: "",
-            mobileNumber: "",
-            alternateContactNumber: "",
-            currentAddress: "",
-            permanentAddress: "",
-          },
-          job: {
-            employeeId: userId,
-            title: "Manager",
-            department: "Management",
-            location: "",
-            workMode: "Office",
-          },
-          education: [],
-          experience: [],
-          skills: { primarySkills: "", secondarySkills: "", toolsTechnologies: "" },
-          bank: { accountHolderName: "", bankName: "", accountNumber: "", ifscCode: "", branch: "" },
-          emergencyContacts: [],
-          idProofs: [],
-          __userId: userId,
+          full_name: auth.fullName || "HR",
+          employee_id: userId,
+          avatar_url: "",
+          dob: "",
+          official_email: auth.email || "",
+          personal_email: "",
+          current_address: "",
+          gender: "",
+          blood_group: "",
+          marital_status: "",
+          emergency_name: "",
+          emergency_contact_number: "",
         };
 
-        const payload = profileToDbPayload(minimal, userId, auth);
-
-        // ⚠️ if your table doesn't have role column, remove role from payload above
         const { error: upErr } = await supabase
-          .from("employees")
-          .upsert(payload, { onConflict: "employee_id" });
+          .from("hrms_employee_profile")
+          .upsert(minimal, { onConflict: "employee_id" });
 
         if (upErr) throw upErr;
 
@@ -338,166 +200,430 @@ export default function HrProfile() {
     }
 
     loadProfile();
-    return () => {
-      mounted = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { mounted = false; };
   }, []);
 
-  /* ================= SAVE (cache + DB) ================= */
   const persistProfile = async (next) => {
+    // Map to the exact columns expected by hrms_employee_profile
+    const db_payload = {
+      employee_id: next.employee_id,
+      full_name: next.full_name,
+      avatar_url: next.avatar_url || null,
+      dob: next.dob || null, // Ensure empty string is null for DB date type
+      gender: next.gender || null,
+      blood_group: next.blood_group || null,
+      marital_status: next.marital_status || null,
+      personal_email: next.personal_email || null,
+      official_email: next.official_email || null,
+      current_address: next.current_address || null,
+      emergency_name: next.emergency_name || null,
+      emergency_contact_number: next.emergency_contact_number || null
+    };
+
     setProfile(next);
     localStorage.setItem(cacheKey, JSON.stringify(next));
 
     if (!isSupabaseConfigured) return;
 
     try {
-      const userId = auth.userId;
-      if (!userId) return;
-
-      const payload = profileToDbPayload(next, userId, auth);
-
+      console.log("[HrProfile] Upserting to hrms_employee_profile:", db_payload);
       const { error } = await supabase
-        .from("employees")
-        .upsert(payload, { onConflict: "employee_id" });
+        .from("hrms_employee_profile")
+        .upsert(db_payload, { onConflict: "employee_id" });
 
-      if (error) throw error;
+      if (error) {
+        console.error("[HrProfile] Upsert error:", error);
+        throw error;
+      }
+      console.log("[HrProfile] Upsert successful");
     } catch (e) {
-      console.error(e);
+      console.error("[HrProfile] persistProfile caught error:", e);
       setErr(e?.message || "Failed to save profile");
     }
   };
 
-  /* ================= UI STATES ================= */
-
-  if (loading) {
+  if (loading && !profile?.full_name) {
     return (
-      <div className="p-10 text-center text-slate-500 font-semibold">
-        Loading HR Profile...
+      <div className="min-h-[400px] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 border-4 border-[#598791]/20 border-t-[#598791] rounded-full animate-spin"></div>
+          <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Loading records...</p>
+        </div>
       </div>
     );
   }
 
-  if (!profile) {
-    return (
-      <div className="p-10 text-center text-rose-600 font-semibold">
-        HR Profile not found
-      </div>
-    );
-  }
-
-  const {
-    name,
-    id,
-    personal,
-    job,
-    education,
-    experience,
-    skills,
-    bank,
-    emergencyContacts,
-    avatar,
-  } = profile;
-
-  const changeAvatar = async (e) => {
+  const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    if (!profile) return;
+    if (file) {
+      setTempFile(file);
+      setShowCropper(true);
+      e.target.value = ''; // Clear input
+    }
+  };
 
-    const previewUrl = URL.createObjectURL(file);
-    setProfile((prev) => ({ ...prev, avatar: previewUrl }));
+  const handleCropComplete = async (croppedFile) => {
+    setShowCropper(false);
+    setTempFile(null);
+    if (!croppedFile) return;
 
     setAvatarUploading(true);
     try {
-      const userId = auth.userId || profile?.__userId || id || "hr";
-      const avatarUrl = isSupabaseConfigured
-        ? await uploadAvatar({ folderKey: userId, file })
-        : previewUrl;
+      const userId = profile.employee_id || auth.userId || "hr";
+      console.log("[HrProfile] Uploading cropped photo for:", userId);
 
-      const nextProfile = { ...profile, avatar: avatarUrl };
+      const avatarUrl = await uploadAvatar({ folderKey: userId, file: croppedFile });
+      console.log("[HrProfile] Upload successful, URL:", avatarUrl);
+
+      const nextProfile = { ...profile, avatar_url: avatarUrl };
       await persistProfile(nextProfile);
+      console.log("[HrProfile] Profile persisted");
     } catch (uploadErr) {
       console.error("Avatar upload failed:", uploadErr);
-      setErr(uploadErr?.message || "Failed to upload avatar");
+      setErr("Failed to upload photo");
     } finally {
       setAvatarUploading(false);
-      if (isSupabaseConfigured) {
-        URL.revokeObjectURL(previewUrl);
-      }
+    }
+  };
+
+  const handleDeleteAvatar = async () => {
+    if (!window.confirm("Are you sure you want to delete your profile photo?")) return;
+
+    setAvatarUploading(true);
+    try {
+      const nextProfile = { ...profile, avatar_url: null };
+      await persistProfile(nextProfile);
+      setPhotoMenu(false); // Close menu
+    } catch (err) {
+      console.error("Avatar delete failed:", err);
+      setErr("Failed to delete photo");
+    } finally {
+      setAvatarUploading(false);
     }
   };
 
   return (
-    <div className="max-w-4xl mx-auto py-12 px-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="bg-white rounded-[32px] border border-slate-100 p-12 shadow-sm flex flex-col items-center text-center gap-6">
-        <div className="h-24 w-24 rounded-full bg-gradient-to-br from-[#598791] to-[#2d2430] flex items-center justify-center text-white text-3xl font-black shadow-lg">
-          {name ? name.charAt(0).toUpperCase() : "U"}
+    <div className="max-w-2xl mx-auto py-8 px-4 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div className="bg-white rounded-[40px] border border-slate-100 p-8 md:p-10 shadow-sm flex flex-col items-center relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-slate-50/50 rounded-full -mr-16 -mt-16 z-0" />
+
+        <div className="relative group z-30 mb-6">
+          <div className="h-40 w-40 rounded-full border-4 border-white shadow-2xl overflow-hidden bg-gradient-to-br from-[#598791] to-[#2d2430] flex items-center justify-center text-white text-5xl font-black relative">
+            {profile?.avatar_url ? (
+              <img src={profile.avatar_url} alt={profile.full_name} className="h-full w-full object-cover" />
+            ) : (
+              profile?.full_name ? profile.full_name.charAt(0).toUpperCase() : "U"
+            )}
+
+            {avatarUploading && (
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                <div className="h-8 w-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+          </div>
+
+          <div className="absolute bottom-2 right-2 z-20">
+            <button
+              onClick={() => {
+                if (profile?.avatar_url) {
+                  setPhotoMenu(!photoMenu);
+                } else {
+                  document.getElementById("hr-avatar-upload-input")?.click();
+                }
+              }}
+              className="h-12 w-12 rounded-full bg-[#598791] text-white flex items-center justify-center shadow-lg cursor-pointer hover:bg-[#4a7079] transition-all hover:scale-110 active:scale-95 border-4 border-white"
+            >
+              <Camera size={20} />
+            </button>
+            <input
+              id="hr-avatar-upload-input"
+              type="file"
+              className="hidden"
+              accept="image/*"
+              onChange={handleFileSelect}
+              disabled={avatarUploading}
+            />
+
+            {photoMenu && (
+              <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-44 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-30 animate-in fade-in zoom-in-95 slide-in-from-top-2 duration-200 origin-top">
+                <button
+                  onClick={() => {
+                    document.getElementById("hr-avatar-upload-input")?.click();
+                    setPhotoMenu(false);
+                  }}
+                  className="w-full px-4 py-3 text-left text-xs font-black text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors uppercase tracking-widest"
+                >
+                  <Camera size={14} className="text-[#598791]" />
+                  Update
+                </button>
+                <button
+                  onClick={handleDeleteAvatar}
+                  className="w-full px-4 py-3 text-left text-xs font-black text-rose-600 hover:bg-rose-50 flex items-center gap-3 transition-colors border-t border-slate-50 uppercase tracking-widest"
+                >
+                  <X size={14} />
+                  Remove
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="space-y-2">
-          <h1 className="text-4xl font-black text-slate-900 tracking-tight">
-            Hi, <span className="text-[#598791]">{name || auth.fullName || "User"}</span>
+        <div className="text-center space-y-1 z-10 mb-8">
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight">
+            Hi, <span className="text-[#598791]">{profile?.full_name || "User"}</span>
           </h1>
-          <p className="text-sm font-bold text-slate-400 uppercase tracking-[0.2em]">
-            Welcome to your profile
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">
+            {profile?.employee_id || "ID"}
           </p>
         </div>
 
-        <div className="h-1 w-24 bg-slate-100 rounded-full" />
+        <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-3 z-10">
+          <Detail label="Full Name" value={profile.full_name} icon={User} />
+          <Detail label="Employee ID" value={profile.employee_id} icon={Hash} />
+          <Detail label="Gender" value={profile.gender} icon={User} />
+          <Detail label="Blood Group" value={profile.blood_group} icon={HeartPulse} />
+          <Detail label="Marital Status" value={profile.marital_status} icon={Users} />
+          <Detail label="Date of Birth" value={formatDDMMYYYY(profile.dob)} icon={CalendarDays} />
+          <Detail label="Official Email" value={profile.official_email} icon={Mail} />
+          <Detail label="Personal Email" value={profile.personal_email} icon={Mail} />
+          <Detail label="Emergency Contact" value={profile.emergency_name} icon={User} />
+          <Detail label="Emergency Phone" value={profile.emergency_contact_number} icon={Phone} />
+          <div className="md:col-span-2">
+            <Detail label="Current Address" value={profile.current_address} icon={MapPin} />
+          </div>
+        </div>
 
-        <img src="/VijayShipping_Logo.png" alt="Vijay Shipping" className="h-8 w-auto" />
+        <div className="mt-8 w-full z-10">
+          <button
+            onClick={() => setEditProfile(true)}
+            className="w-full py-3 rounded-2xl border border-slate-100 bg-white text-xs font-black text-slate-600 uppercase tracking-widest hover:bg-slate-50 transition-all hover:scale-[1.01] active:scale-95 shadow-sm flex items-center justify-center gap-2"
+          >
+            <Pencil size={14} /> Edit Profile Details
+          </button>
+        </div>
+
+        <div className="mt-10 opacity-30 z-10">
+          <img src="/VijayShipping_Logo.png" alt="Vijay Shipping" className="h-6 w-auto object-contain" />
+        </div>
+      </div>
+
+      {editProfile && (
+        <ProfileEditModal
+          profile={profile}
+          onClose={() => setEditProfile(false)}
+          onSave={async (next) => {
+            if (!next.dob || String(next.dob).trim() === "") {
+              alert("Date of Birth is required.");
+              return;
+            }
+            setAvatarUploading(true); // Re-use saving state if needed
+            try {
+              await persistProfile(next);
+              setEditProfile(false);
+            } finally {
+              setAvatarUploading(false);
+            }
+          }}
+        />
+      )}
+      <ImageCropper 
+        isOpen={showCropper}
+        imageFile={tempFile}
+        onCropComplete={handleCropComplete}
+        onCancel={() => {
+          setShowCropper(false);
+          setTempFile(null);
+        }}
+      />
+    </div>
+  );
+}
+
+/* ---------------- EDIT MODAL ---------------- */
+function ProfileEditModal({ profile, onSave, onClose, saving }) {
+  const [form, setForm] = useState({
+    full_name: profile.full_name || "",
+    employee_id: profile.employee_id || "",
+    dob: profile.dob || "",
+    personal_email: profile.personal_email || "",
+    official_email: profile.official_email || "",
+    current_address: profile.current_address || "",
+    gender: profile.gender || "",
+    blood_group: profile.blood_group || "",
+    marital_status: profile.marital_status || "",
+    emergency_name: profile.emergency_name || "",
+    emergency_contact_number: profile.emergency_contact_number || ""
+  });
+
+  const handleChange = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const handleReset = () => {
+    if (window.confirm("Are you sure you want to reset all fields to their original values?")) {
+      setForm({
+        full_name: profile.full_name || "",
+        employee_id: profile.employee_id || "",
+        dob: profile.dob || "",
+        personal_email: profile.personal_email || "",
+        official_email: profile.official_email || "",
+        current_address: profile.current_address || "",
+        gender: profile.gender || "",
+        blood_group: profile.blood_group || "",
+        marital_status: profile.marital_status || "",
+        emergency_name: profile.emergency_name || "",
+        emergency_contact_number: profile.emergency_contact_number || ""
+      });
+    }
+  };
+
+  return (
+    <Modal open={true} title="Edit Profile Details" onClose={onClose}>
+      <div className="space-y-6 py-2 overflow-y-auto max-h-[70vh] px-1 custom-scrollbar">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Full Name</label>
+            <input
+              type="text"
+              value={form.full_name}
+              onChange={e => handleChange("full_name", e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#598791] transition-all"
+            />
+          </div>
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Employee ID</label>
+            <input
+              type="text"
+              value={form.employee_id}
+              disabled
+              className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none opacity-60 cursor-not-allowed"
+            />
+          </div>
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date of Birth</label>
+            <input
+              type="date"
+              value={form.dob}
+              onChange={e => handleChange("dob", e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#598791] transition-all"
+            />
+          </div>
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gender</label>
+            <select
+              value={form.gender}
+              onChange={e => handleChange("gender", e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#598791] transition-all"
+            >
+              <option value="">Select Gender</option>
+              <option value="Male">Male</option>
+              <option value="Female">Female</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Blood Group</label>
+            <input
+              type="text"
+              value={form.blood_group}
+              onChange={e => handleChange("blood_group", e.target.value)}
+              placeholder="e.g. O+"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#598791] transition-all"
+            />
+          </div>
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Marital Status</label>
+            <select
+              value={form.marital_status}
+              onChange={e => handleChange("marital_status", e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#598791] transition-all"
+            >
+              <option value="">Select Status</option>
+              <option value="Single">Single</option>
+              <option value="Married">Married</option>
+            </select>
+          </div>
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Official Email</label>
+            <input
+              type="email"
+              value={form.official_email}
+              onChange={e => handleChange("official_email", e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#598791] transition-all"
+            />
+          </div>
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Personal Email</label>
+            <input
+              type="email"
+              value={form.personal_email}
+              onChange={e => handleChange("personal_email", e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#598791] transition-all"
+            />
+          </div>
+
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Emergency Contact Name</label>
+            <input
+              type="text"
+              value={form.emergency_name}
+              onChange={e => handleChange("emergency_name", e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#598791] transition-all"
+            />
+          </div>
+          <div className="space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Emergency Contact Number</label>
+            <input
+              type="text"
+              value={form.emergency_contact_number}
+              onChange={e => handleChange("emergency_contact_number", e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#598791] transition-all"
+            />
+          </div>
+
+          <div className="md:col-span-2 space-y-1 text-left">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Current Address</label>
+            <textarea
+              value={form.current_address}
+              onChange={e => handleChange("current_address", e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-[#598791] transition-all min-h-[80px] resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mt-6 sticky bottom-0 bg-white pb-2 pt-4 border-t">
+          <button
+            onClick={handleReset}
+            disabled={saving}
+            className="text-xs font-black text-rose-500 uppercase tracking-widest hover:bg-rose-50 px-4 py-2 rounded-xl transition-all"
+          >
+            Reset
+          </button>
+          <div className="flex gap-3">
+            <GhostButton onClick={onClose} disabled={saving}>Cancel</GhostButton>
+            <button
+              onClick={() => onSave(form)}
+              disabled={saving}
+              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#598791] text-xs font-black text-white uppercase tracking-widest hover:bg-[#4a7079] shadow-lg disabled:opacity-50 transition-all"
+            >
+              {saving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+              {saving ? "Saving..." : "Save Changes"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function Detail({ label, value, icon: Icon }) {
+  return (
+    <div className="flex flex-col gap-1.5 p-4 rounded-xl bg-slate-50 border border-slate-100 transition-all hover:border-slate-200 hover:bg-white hover:shadow-sm group">
+      <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest text-left">
+        {Icon && <Icon size={12} className="text-slate-300 group-hover:text-[#598791] transition-colors" />}
+        {label}
+      </div>
+      <div className="text-sm font-bold text-slate-700 truncate text-left font-sans">
+        {value || "-"}
       </div>
     </div>
   );
 }
-
-/* ========================================================= */
-/* ===================== UI HELPERS ======================== */
-/* ========================================================= */
-
-function Badge({ children }) {
-  return (
-    <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold bg-slate-100">
-      {children}
-    </span>
-  );
-}
-
-function SectionCard({ title, children }) {
-  return (
-    <div className="rounded-2xl border bg-white p-5 shadow-sm">
-      <p className="text-sm font-bold text-slate-900">{title}</p>
-      {children}
-    </div>
-  );
-}
-
-function Detail({ label, value, full }) {
-  return (
-    <div className={full ? "md:col-span-2" : ""}>
-      <p className="text-xs uppercase text-slate-500">{label}</p>
-      <p className="font-semibold text-slate-900">{value || "-"}</p>
-    </div>
-  );
-}
-
-function CardBlock({ title, icon: Icon, children }) {
-  return (
-    <div className="rounded-xl border bg-white p-4 space-y-3">
-      <div className="flex items-center gap-2 font-semibold">
-        <Icon size={16} /> {title}
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
-    </div>
-  );
-}
-
-function EmptyHint({ icon: Icon, text }) {
-  return (
-    <div className="flex items-center gap-2 text-slate-500 text-sm">
-      <Icon size={16} /> {text}
-    </div>
-  );
-}
-
-

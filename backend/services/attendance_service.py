@@ -5,8 +5,11 @@ Attendance service - coordinates the full attendance marking pipeline using Supa
 from __future__ import annotations
 
 import os
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timezone, timedelta
 from typing import Optional, Tuple
+
+# India Standard Time (Chennai/Kolkata)
+IST = timezone(timedelta(hours=5, minutes=30))
 import time
 import numpy as np
 import torch
@@ -16,15 +19,15 @@ from services.anti_spoof import anti_spoof_service
 from services.face_recognition import face_recognition_service
 from services.geofencing import is_within_geofence, calculate_distance
 from geopy.distance import geodesic
-from utils.image_utils import save_image
+# from utils.image_utils import save_image
 
-# Directory for storing attendance images
-ATTENDANCE_IMAGES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "attendance_images")
+# Directory for storing attendance images (Disabled)
+# ATTENDANCE_IMAGES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "attendance_images")
 
 class AttendanceService:
     def __init__(self):
         """Initialize attendance service"""
-        os.makedirs(ATTENDANCE_IMAGES_DIR, exist_ok=True)
+        # os.makedirs(ATTENDANCE_IMAGES_DIR, exist_ok=True)
         self.supabase = get_supabase()
         self._enrollment_cache = []
         self._last_cache_update = None
@@ -49,12 +52,12 @@ class AttendanceService:
 
             # 2. Fetch all employees to map details 
             emp_res = self.supabase.table("employees").select("employee_id, full_name, department").execute()
-            emp_map = {e["employee_id"]: e["full_name"] for e in emp_res.data}
+            emp_map = {(e["employee_id"] or "").strip(): e["full_name"] for e in emp_res.data}
             
             new_cache = []
             for enr in enrollments:
                 try:
-                    emp_id = enr["employee_id"]
+                    emp_id = (enr["employee_id"] or "").strip()
                     encoding = face_recognition_service.json_to_encoding(enr["face_encoding"])
                     full_name = emp_map.get(emp_id, "Unknown")
                     # (employee_id, full_name, encoding, user_uuid)
@@ -270,22 +273,7 @@ class AttendanceService:
                 msg = "Login Marked Successfully!"
                 att_status = "In"
             
-            # Step 5: Save image for record (Potentially in background)
-            image_filename = f"{employee_id}_{att_status.lower()}_{now.strftime('%Y%m%d_%H%M%S')}.jpg"
-            image_path = os.path.join(ATTENDANCE_IMAGES_DIR, image_filename)
-            
-            def save_image_task(img, path):
-                try:
-                    save_image(img, path)
-                except Exception as e:
-                    print(f"Error saving image in background: {e}")
-
-            if background_tasks:
-                background_tasks.add_task(save_image_task, image, image_path)
-            else:
-                save_image_task(image, image_path)
-            
-            # Step 6: Log Verification (Potentially in background)
+            # Step 5: Log Verification (Potentially in background)
             def log_verification_task(uid, eid, t):
                 try:
                     self.supabase.table("face_verifications").insert({
@@ -336,8 +324,10 @@ class AttendanceService:
                     att_date = sess["attendance_date"]
                     check_in_str = sess["check_in"]
                     
-                    # Set check_out to 23:59:59 of the attendance_date
-                    check_out_dt = datetime.fromisoformat(f"{att_date}T23:59:59").replace(tzinfo=timezone.utc)
+                    # Set check_out to 23:59:59 of the attendance_date in IST
+                    # This will be stored correctly in UTC by Supabase if it handles offsets, 
+                    # or at least the wall time will be correct when queried back.
+                    check_out_dt = datetime.fromisoformat(f"{att_date}T23:59:59").replace(tzinfo=IST)
                     
                     # Calculate duration
                     if check_in_str.endswith('Z'):
@@ -396,8 +386,8 @@ class AttendanceService:
                     emp_id = sess["employee_id"]
                     check_in_str = sess["check_in"]
                     
-                    # Set check_out to 23:59:59 of today
-                    check_out_dt = datetime.fromisoformat(f"{today_str}T23:59:59").replace(tzinfo=timezone.utc)
+                    # Set check_out to 23:59:59 of today in IST
+                    check_out_dt = datetime.fromisoformat(f"{today_str}T23:59:59").replace(tzinfo=IST)
                     
                     # Calculate duration
                     if check_in_str.endswith('Z'):

@@ -38,8 +38,13 @@ import {
     Visibility as ViewIcon,
     CheckCircle as PresentIcon,
     Cancel as AbsentIcon,
-    Delete as DeleteIcon
-} from '@mui/icons-material';
+} from '@mui/icons-material'
+
+import {
+    ModernSummaryTable,
+    ModernEmployeeDetailsTable,
+    ModernSessionLogTable
+} from './ModernReportComponents';
 import { API_BASE } from '../../lib/api';
 import { clearToken, clearUser, getToken } from '../../lib/storage';
 import { formatDate, formatTime } from '../../lib/format';
@@ -54,23 +59,33 @@ export default function Reports() {
     const [timePeriod, setTimePeriod] = React.useState('day');
     const [dateFrom, setDateFrom] = React.useState('');
     const [dateTo, setDateTo] = React.useState('');
+    const [searchTerm, setSearchTerm] = React.useState('');
     const [selectedEmployee, setSelectedEmployee] = React.useState('all'); // Changed from reportEmployee
     const [attendanceType, setAttendanceType] = React.useState('all'); // New state
     const [reportRecords, setReportRecords] = React.useState<any[]>([]);
+
+
     const [summary, setSummary] = React.useState({ total_present: 0, total_absent: 0 });
-    const [filterOptions, setFilterOptions] = React.useState<{ employees: any[] }>({ employees: [] });
     const [generating, setGenerating] = React.useState(false);
     const [error, setError] = React.useState('');
-    
+
     // Drill-down state
-    const [drillDownOpen, setDrillDownOpen] = React.useState(false);
+    const [summaryRecords, setSummaryRecords] = React.useState<any[]>([]); // For Level 1
+
+    const filteredSummaryRecords = React.useMemo(() => {
+        if (!searchTerm) return summaryRecords;
+        const lowerSearch = searchTerm.toLowerCase();
+        return summaryRecords.filter(r =>
+            r.full_name?.toLowerCase().includes(lowerSearch) ||
+            r.employee_id?.toLowerCase().includes(lowerSearch)
+        );
+    }, [summaryRecords, searchTerm]);
+    const [employeeDetailsOpen, setEmployeeDetailsOpen] = React.useState(false); // Level 2 Modal
+    const [selectedEmployeeName, setSelectedEmployeeName] = React.useState('');
+    const [drillDownOpen, setDrillDownOpen] = React.useState(false); // Level 3 Modal
     const [selectedDaySessions, setSelectedDaySessions] = React.useState<any[]>([]);
     const [selectedDayInfo, setSelectedDayInfo] = React.useState<any>(null);
-    
-    // Delete state
-    const [selectedSessionIds, setSelectedSessionIds] = React.useState<string[]>([]);
-    const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
-    const [deleting, setDeleting] = React.useState(false);
+
 
     // Download states
     const [downloadDialogOpen, setDownloadDialogOpen] = React.useState(false);
@@ -101,21 +116,6 @@ export default function Reports() {
         setDateTo(todayStr);
         setDownloadDateFrom(todayStr);
         setDownloadDateTo(todayStr);
-
-        const loadOptions = async () => {
-            try {
-                const token = getToken();
-                const res = await fetch(`${API_BASE}/admin/filter-options`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (!res.ok) return;
-                const data = await res.json();
-                setFilterOptions({ employees: data.employees || [] });
-            } catch (e) {
-                console.error(e);
-            }
-        };
-        loadOptions();
     }, []);
 
     // Handle Time Period Presets
@@ -150,88 +150,247 @@ export default function Reports() {
                 date_from: dateFrom,
                 date_to: dateTo
             });
-            if (selectedEmployee && selectedEmployee !== 'all') params.append('employee_id', selectedEmployee);
-            if (attendanceType && attendanceType !== 'all') params.append('attendance_type', attendanceType);
 
-            const response = await fetch(`${API_BASE}/admin/reports/aggregated?${params.toString()}`, {
+            // Always fetch summary for level 1
+            const summaryRes = await fetch(`${API_BASE}/admin/reports/employee-summary?${params.toString()}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-
-            if (response.status === 401) {
+            if (summaryRes.status === 401) {
                 handleUnauthorized();
                 return;
             }
-            if (!response.ok) throw new Error('Failed to fetch report');
+            if (summaryRes.ok) {
+                const data = await summaryRes.json();
+                const sorted = (data.records || []).sort((a: any, b: any) => (a.full_name || "").localeCompare(b.full_name || ""));
+                setSummaryRecords(sorted);
+            }
 
-            const data = await response.json();
-            setReportRecords(data.records || []);
-            setSummary(data.summary || { total_present: 0, total_absent: 0 });
+            // If an employee is selected, fetch their detailed records (for Level 2 modal)
+            if (selectedEmployee && selectedEmployee !== 'all') {
+                params.append('employee_id', selectedEmployee);
+                if (attendanceType && attendanceType !== 'all') params.append('attendance_type', attendanceType);
+
+                const detailRes = await fetch(`${API_BASE}/admin/reports/aggregated?${params.toString()}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+
+                if (detailRes.ok) {
+                    const data = await detailRes.json();
+                    setReportRecords(data.records || []);
+                    setSummary(data.summary || { total_present: 0, total_absent: 0 });
+                }
+            } else {
+                setReportRecords([]);
+                setSummary({ total_present: 0, total_absent: 0 });
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Error generating report');
         } finally {
             setGenerating(false);
         }
-    }, [dateFrom, dateTo, selectedEmployee, attendanceType]); // Updated dependencies
+    }, [dateFrom, dateTo, selectedEmployee, attendanceType]);
 
     React.useEffect(() => {
         const timer = setTimeout(() => generateReport(), 300);
         return () => clearTimeout(timer);
     }, [generateReport]);
 
-    const handleDownloadCSV = () => {
-        if (reportRecords.length === 0) return;
-        
-        const headers = ["Date", "Employee Name", "Employee ID", "Attendance Type", "Login", "Logout", "Duration (hrs)"];
-        const rows = reportRecords.map(r => [
-            r.date,
-            r.full_name,
-            r.employee_id,
-            r.attendance_type,
-            formatTime(r.first_login),
-            formatTime(r.last_login),
-            r.total_hours.toFixed(2)
-        ]);
+    // Summary Report (Aggregated View) = one row per employee per date, first login + last logout
+    // Converts YYYY-MM-DD or ISO timestamp to DD-MM-YYYY
+    const fmtDate = (d: string | undefined) => {
+        if (!d) return '--';
+        const part = d.split('T')[0]; // handles full ISO timestamps
+        const [y, m, dd] = part.split('-');
+        return (y && m && dd) ? `${dd}-${m}-${y}` : d;
+    };
 
-        const csvContent = [headers, ...rows].map(e => e.join(",")).join("\n");
+    const getAggregatedRows = async () => {
+        const token = getToken();
+        const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo, limit: '5000' });
+        if (selectedEmployee && selectedEmployee !== 'all') params.append('employee_id', selectedEmployee);
+        if (attendanceType && attendanceType !== 'all') params.append('attendance_type', attendanceType);
+
+        const res = await fetch(`${API_BASE}/admin/attendance-records?${params}`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error('Failed to fetch records');
+        const data = await res.json();
+        const records: any[] = data.records || [];
+        if (records.length === 0) return [];
+
+        // Group by employee + date to get first login, last logout, type, and total duration
+        const grouped: Record<string, any> = {};
+        for (const r of records) {
+            const dateKey = r.check_in ? r.check_in.split('T')[0] : '';
+            const key = `${r.employee_id}_${dateKey}`;
+            if (!grouped[key]) {
+                grouped[key] = {
+                    full_name: r.full_name,
+                    employee_id: r.employee_id,
+                    date: dateKey,
+                    first_login: r.check_in,
+                    last_logout: r.check_out || null,
+                    has_office: !r.is_field_work,
+                    has_field: !!r.is_field_work,
+                    total_hours: r.total_hours || 0
+                };
+            } else {
+                if (r.check_in && r.check_in < grouped[key].first_login) grouped[key].first_login = r.check_in;
+                if (r.check_out && (!grouped[key].last_logout || r.check_out > grouped[key].last_logout)) {
+                    grouped[key].last_logout = r.check_out;
+                }
+                if (!r.is_field_work) grouped[key].has_office = true;
+                if (r.is_field_work) grouped[key].has_field = true;
+                grouped[key].total_hours += r.total_hours || 0;
+            }
+        }
+        // Compute type label and formatted duration
+        let finalRows = Object.values(grouped).map((g: any) => ({
+            ...g,
+            type: g.has_office && g.has_field ? 'Hybrid' : g.has_field ? 'Field' : 'Office',
+            duration: (() => {
+                const h = Math.floor(g.total_hours);
+                const m = Math.round((g.total_hours - h) * 60);
+                return h > 0 ? `${h}h ${m}m` : `${m}m`;
+            })()
+        }));
+
+        // Apply type filter client-side
+        if (attendanceType && attendanceType !== 'all') {
+            finalRows = finalRows.filter(r => r.type === attendanceType);
+        }
+
+        return finalRows.sort((a: any, b: any) =>
+            a.date.localeCompare(b.date) || a.full_name.localeCompare(b.full_name)
+        );
+    };
+
+    const handleDownloadAggregatedCSV = async () => {
+        setExporting(true);
+        try {
+            const rows = await getAggregatedRows();
+            if (rows.length === 0) { alert('No records found for the selected period'); return; }
+
+            const headers = ['Employee Name', 'Employee ID', 'Date', 'Type', 'First Login', 'Last Logout', 'Duration'];
+            const csvRows = rows.map((r: any) => [
+                r.full_name, r.employee_id, fmtDate(r.date), r.type,
+                formatTime(r.first_login), formatTime(r.last_logout) || '--', r.duration
+            ]);
+            const csvContent = "\uFEFF" + [headers, ...csvRows].map((e: any[]) =>
+                e.map((cell: any) => `"${(cell ?? '').toString().replace(/"/g, '""')}"`).join(',')
+            ).join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.setAttribute('href', URL.createObjectURL(blob));
+            link.setAttribute('download', `Summary_Aggregated_${dateFrom}_to_${dateTo}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setDownloadDialogOpen(false);
+        } catch (err) {
+            alert('Failed to download: ' + (err instanceof Error ? err.message : 'Unknown error'));
+        } finally {
+            setExporting(false);
+        }
+    };
+
+    const handleDownloadAggregatedPDF = async () => {
+        setExporting(true);
+        try {
+            const rows = await getAggregatedRows();
+            if (rows.length === 0) { alert('No records found for the selected period'); return; }
+
+            const doc = new jsPDF('landscape');
+            doc.setFontSize(16);
+            (doc as any).setFont(undefined, 'bold');
+            doc.text('Summary Attendance Report (Aggregated)', 14, 16);
+            doc.setFontSize(10);
+            (doc as any).setFont(undefined, 'normal');
+            doc.text(`Period: ${fmtDate(dateFrom)} to ${fmtDate(dateTo)}  |  Total Records: ${rows.length}`, 14, 24);
+
+            autoTable(doc, {
+                head: [['Employee Name', 'Employee ID', 'Date', 'Type', 'First Login', 'Last Logout', 'Duration']],
+                body: rows.map((r: any) => [
+                    r.full_name, r.employee_id, fmtDate(r.date), r.type,
+                    formatTime(r.first_login),
+                    formatTime(r.last_logout) || '--',
+                    r.duration
+                ]),
+                startY: 30,
+                theme: 'striped',
+                headStyles: { fillColor: [89, 135, 145], textColor: 255, fontStyle: 'bold' },
+                alternateRowStyles: { fillColor: [245, 250, 252] },
+                styles: { fontSize: 9, cellPadding: 3 }
+            });
+
+            doc.save(`Summary_Aggregated_${dateFrom}_to_${dateTo}.pdf`);
+            setDownloadDialogOpen(false);
+        } catch (err) {
+            alert('Failed to download: ' + (err instanceof Error ? err.message : 'Unknown error'));
+        } finally {
+            setExporting(false);
+        }
+    };
+
+    // Employee Attendance Totals = employee name + total present/absent count
+    const handleDownloadTotalsCSV = () => {
+        const filtered = selectedEmployee && selectedEmployee !== 'all'
+            ? summaryRecords.filter((r: any) => r.employee_id === selectedEmployee)
+            : summaryRecords;
+        if (filtered.length === 0) { alert('No records found for the selected period'); return; }
+        const headers = ['#', 'Employee Name', 'Employee ID', 'Total Present Days', 'Total Absent Days'];
+        const rows = filtered.map((r: any, i: number) => [i + 1, r.full_name, r.employee_id, r.total_present, r.total_absent]);
+        const csvContent = "\uFEFF" + [headers, ...rows].map((e: any[]) =>
+            e.map((cell: any) => `"${(cell ?? '').toString().replace(/"/g, '""')}"`).join(',')
+        ).join('\n');
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement("a");
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", `Attendance_Report_${dateFrom}_to_${dateTo}.csv`);
+        const link = document.createElement('a');
+        link.setAttribute('href', URL.createObjectURL(blob));
+        link.setAttribute('download', `Employee_Attendance_Totals_${dateFrom}_to_${dateTo}.csv`);
         link.style.visibility = 'hidden';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
     };
 
-    const handleDownloadPDF = () => {
+    const handleDownloadTotalsPDF = () => {
+        const filtered = selectedEmployee && selectedEmployee !== 'all'
+            ? summaryRecords.filter((r: any) => r.employee_id === selectedEmployee)
+            : summaryRecords;
+        if (filtered.length === 0) { alert('No records found for the selected period'); return; }
         const doc = new jsPDF();
-        doc.text("Attendance Report", 14, 15);
+        doc.setFontSize(16);
+        (doc as any).setFont(undefined, 'bold');
+        doc.text('Employee Attendance Totals', 14, 16);
         doc.setFontSize(10);
-        doc.text(`Period: ${dateFrom} to ${dateTo}`, 14, 22);
-        if (selectedEmployee && selectedEmployee !== 'all') { // Updated from reportEmployee
-            const empName = filterOptions.employees.find(e => e.employee_id === selectedEmployee)?.full_name || selectedEmployee;
-            doc.text(`Employee: ${empName}`, 14, 27);
-        }
-
-        const tableColumn = ["Date", "Employee", "Type", "Login", "Logout", "Duration"];
-        const tableRows = reportRecords.map(r => [
-            r.date,
-            r.full_name,
-            r.attendance_type,
-            formatTime(r.first_login),
-            formatTime(r.last_login),
-            r.formatted_duration
-        ]);
+        (doc as any).setFont(undefined, 'normal');
+        doc.text(`Period: ${fmtDate(dateFrom)} to ${fmtDate(dateTo)}`, 14, 24);
+        doc.text(`Total Employees: ${filtered.length}`, 14, 30);
 
         autoTable(doc, {
-            head: [tableColumn],
-            body: tableRows,
-            startY: 35,
-            theme: 'striped'
+            head: [['#', 'Employee Name', 'Employee ID', 'Present Days', 'Absent Days']],
+            body: filtered.map((r: any, i: number) => [i + 1, r.full_name, r.employee_id, r.total_present, r.total_absent]),
+            startY: 36,
+            theme: 'striped',
+            headStyles: { fillColor: [89, 135, 145], textColor: 255, fontStyle: 'bold' },
+            alternateRowStyles: { fillColor: [245, 250, 252] },
+            styles: { fontSize: 9, cellPadding: 3 }
         });
 
-        doc.save(`Attendance_Report_${dateFrom}_to_${dateTo}.pdf`);
+        doc.save(`Employee_Attendance_Totals_${dateFrom}_to_${dateTo}.pdf`);
+    };
+
+    const handleDownloadCSV = () => {
+        if (downloadOption === 'summary') handleDownloadAggregatedCSV();
+        else if (downloadOption === 'totals') handleDownloadTotalsCSV();
+        else handleDownloadDetailedLogs('csv');
+    };
+
+    const handleDownloadPDF = () => {
+        if (downloadOption === 'summary') handleDownloadAggregatedPDF();
+        else if (downloadOption === 'totals') handleDownloadTotalsPDF();
+        else handleDownloadDetailedLogs('pdf');
     };
 
     const handleDownloadDetailedLogs = async (format: 'csv' | 'pdf') => {
@@ -243,7 +402,7 @@ export default function Reports() {
                 date_to: dateTo,
                 limit: '5000'
             });
-            
+
             if (selectedEmployee && selectedEmployee !== 'all') {
                 params.append('employee_id', selectedEmployee);
             }
@@ -254,11 +413,19 @@ export default function Reports() {
             const response = await fetch(`${API_BASE}/admin/attendance-records?${params.toString()}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
-            
+
             if (!response.ok) throw new Error('Failed to fetch records');
             const data = await response.json();
-            const records = data.records || [];
-            
+            let records = data.records || [];
+
+            // Apply type filter client-side
+            if (attendanceType && attendanceType !== 'all') {
+                records = records.filter((r: any) => {
+                    const rowType = r.is_field_work ? 'Field' : 'Office';
+                    return rowType === attendanceType;
+                });
+            }
+
             if (records.length === 0) {
                 // We'll use a standard alert for now
                 alert('No records found for the selected period');
@@ -266,19 +433,20 @@ export default function Reports() {
             }
 
             if (format === 'csv') {
-                const headers = ["Date", "Employee Name", "ID", "Login", "Logout", "Duration", "Type", "Location"];
+                const headers = ["Date", "Employee Name", "ID", "Login", "Logout", "Duration", "Type", "Entry Location", "Exit Address"];
                 const rows = records.map((r: any) => [
-                    formatDate(r.check_in),
+                    fmtDate(r.check_in),
                     r.full_name,
                     r.employee_id,
                     formatTime(r.check_in),
                     formatTime(r.check_out),
                     r.formatted_duration,
                     r.is_field_work ? 'Field' : 'Office',
-                    r.entry_location_display || 'Office'
+                    r.entry_location_display || 'Office',
+                    r.exit_location_display || '--'
                 ]);
-                
-                const csvContent = "\uFEFF" + [headers, ...rows].map((e: (string|number)[]) => e.map((cell: any) => `"${(cell || '').toString().replace(/"/g, '""')}"`).join(",")).join("\n");
+
+                const csvContent = "\uFEFF" + [headers, ...rows].map((e: (string | number)[]) => e.map((cell: any) => `"${(cell || '').toString().replace(/"/g, '""')}"`).join(",")).join("\n");
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement("a");
                 const url = URL.createObjectURL(blob);
@@ -292,18 +460,19 @@ export default function Reports() {
                 const doc = new jsPDF('landscape');
                 doc.text("Detailed Attendance Logs", 14, 15);
                 doc.setFontSize(10);
-                doc.text(`Period: ${downloadDateFrom} to ${downloadDateTo}`, 14, 22);
+                doc.text(`Period: ${fmtDate(downloadDateFrom)} to ${fmtDate(downloadDateTo)}`, 14, 22);
 
-                const tableColumn = ["Date", "Name", "ID", "In", "Out", "Duration", "Type", "Location"];
+                const tableColumn = ["Date", "Name", "ID", "In", "Out", "Duration", "Type", "Entry Location", "Exit Address"];
                 const tableRows = records.map((r: any) => [
-                    formatDate(r.check_in),
+                    fmtDate(r.check_in),
                     r.full_name,
                     r.employee_id,
                     formatTime(r.check_in),
                     formatTime(r.check_out),
                     r.formatted_duration,
                     r.is_field_work ? 'Field' : 'Office',
-                    r.entry_location_display || 'Office'
+                    r.entry_location_display || 'Office',
+                    r.exit_location_display || '--'
                 ]);
 
                 autoTable(doc, {
@@ -311,9 +480,10 @@ export default function Reports() {
                     body: tableRows,
                     startY: 30,
                     theme: 'striped',
-                    styles: { fontSize: 8 },
+                    styles: { fontSize: 7 },
                     columnStyles: {
-                        7: { cellWidth: 60 } // Location column wider
+                        7: { cellWidth: 45 },
+                        8: { cellWidth: 45 }
                     }
                 });
 
@@ -327,223 +497,228 @@ export default function Reports() {
         }
     };
 
+    const handleEmployeeClick = (emp: any) => {
+        setSelectedEmployee(emp.employee_id);
+        setSelectedEmployeeName(emp.full_name);
+        setEmployeeDetailsOpen(true);
+    };
+
+    const handleCloseDetails = () => {
+        setEmployeeDetailsOpen(false);
+        setSelectedEmployee('all');
+        setSelectedEmployeeName('');
+    };
+
     const openDrillDown = (row: any) => {
         setSelectedDayInfo(row);
         setSelectedDaySessions(row.sessions || []);
-        setSelectedSessionIds([]);
         setDrillDownOpen(true);
     };
 
-    // Handle checkbox toggle for session selection
-    const handleSessionSelect = (sessionId: string) => {
-        setSelectedSessionIds(prev => {
-            if (prev.includes(sessionId)) {
-                return prev.filter(id => id !== sessionId);
-            } else {
-                return [...prev, sessionId];
-            }
-        });
-    };
+    const handleNavigateDate = (direction: 'next' | 'prev') => {
+        const currentIndex = reportRecords.findIndex(r => r.date === selectedDayInfo?.date);
+        if (currentIndex === -1) return;
 
-    // Handle select all sessions
-    const handleSelectAll = () => {
-        if (selectedSessionIds.length === selectedDaySessions.length) {
-            setSelectedSessionIds([]);
-        } else {
-            setSelectedSessionIds(selectedDaySessions.map((s: any) => s.id).filter(Boolean));
+        const nextIndex = direction === 'next' ? currentIndex + 1 : currentIndex - 1;
+        if (nextIndex >= 0 && nextIndex < reportRecords.length) {
+            const nextRecord = reportRecords[nextIndex];
+            setSelectedDayInfo(nextRecord);
+            setSelectedDaySessions(nextRecord.sessions || []);
         }
     };
 
-    // Open delete confirmation dialog
-    const openDeleteDialog = () => {
-        if (selectedSessionIds.length > 0) {
-            setDeleteDialogOpen(true);
-        }
-    };
-
-    // Delete selected sessions
-    const handleDeleteSessions = async () => {
-        if (selectedSessionIds.length === 0) return;
-        
-        setDeleting(true);
-        try {
-            const token = getToken();
-            if (!token) return;
-
-            let deletedCount = 0;
-            for (const sessionId of selectedSessionIds) {
-                const response = await fetch(`${API_BASE}/admin/attendance/${sessionId}`, {
-                    method: 'DELETE',
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (response.ok) {
-                    deletedCount++;
-                }
-            }
-
-            // Refresh the report after deletion
-            await generateReport();
-            
-            // Update the drill-down sessions
-            const updatedSessions = selectedDaySessions.filter((s: any) => !selectedSessionIds.includes(s.id));
-            setSelectedDaySessions(updatedSessions);
-            setSelectedSessionIds([]);
-            setDeleteDialogOpen(false);
-            
-            // Show success message (you could add a snackbar here)
-            console.log(`Successfully deleted ${deletedCount} session(s)`);
-        } catch (err) {
-            console.error('Error deleting sessions:', err);
-        } finally {
-            setDeleting(false);
-        }
-    };
 
     return (
-        <Stack spacing={4} sx={{ pb: 6 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Typography variant="h4" sx={{ fontWeight: 800, color: 'text.primary', fontFamily: "'Segoe UI', sans-serif" }}>
+        <Stack spacing={3} sx={{ pb: 6 }}>
+            <Box sx={{
+                display: 'flex',
+                flexDirection: { xs: 'column', sm: 'row' },
+                justifyContent: 'space-between',
+                alignItems: { xs: 'flex-start', sm: 'center' },
+                gap: 2
+            }}>
+                <Typography variant="h4" sx={{
+                    fontWeight: 800,
+                    color: 'text.primary',
+                    fontFamily: "'Segoe UI', sans-serif",
+                    fontSize: { xs: '1.75rem', sm: '2.125rem' }
+                }}>
                     Reports
                 </Typography>
-                <Stack direction="row" spacing={2}>
-                    <Button 
-                        variant="contained" 
-                        startIcon={<DownloadIcon />} 
-                        onClick={() => setDownloadDialogOpen(true)}
-                        disabled={reportRecords.length === 0}
-                        sx={{ bgcolor: '#598791', '&:hover': { bgcolor: '#466c74' }, borderRadius: '12px', textTransform: 'none', fontWeight: 700, px: 3 }}
-                    >
-                        Download
-                    </Button>
-                </Stack>
+                <Tooltip title="Download Report">
+                    <Box sx={{ alignSelf: { xs: 'flex-end', sm: 'auto' } }}>
+                        <IconButton
+                            onClick={(e) => {
+                                (e.currentTarget as HTMLElement).blur();
+                                setDownloadDialogOpen(true);
+                            }}
+                            disabled={summaryRecords.length === 0}
+                            sx={{
+                                bgcolor: alpha('#598791', 0.1),
+                                color: '#598791',
+                                '&:hover': { bgcolor: alpha('#598791', 0.2) },
+                                borderRadius: '12px',
+                                width: { xs: 34, sm: 38 },
+                                height: { xs: 34, sm: 38 }
+                            }}
+                        >
+                            <DownloadIcon sx={{ fontSize: { xs: '1.2rem', sm: '1.5rem' } }} />
+                        </IconButton>
+                    </Box>
+                </Tooltip>
             </Box>
 
-            {/* Summary Cards - Only shown for individual employees */}
-            {selectedEmployee && selectedEmployee !== 'all' && (
-                <Grid container spacing={3}>
-                    <Grid item xs={12} md={6}>
-                        <Card sx={{ borderRadius: '16px', bgcolor: alpha(theme.palette.success.main, 0.05), border: '1px solid', borderColor: alpha(theme.palette.success.main, 0.1) }}>
-                            <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                <Box sx={{ p: 1.5, borderRadius: '12px', bgcolor: 'success.main', color: 'white' }}>
-                                    <PresentIcon />
-                                </Box>
-                                <Box>
-                                    <Typography variant="body2" color="text.secondary" fontWeight={600}>Total Present Days</Typography>
-                                    <Typography variant="h4" fontWeight={800}>{summary.total_present}</Typography>
-                                </Box>
-                            </CardContent>
-                        </Card>
+            {/* Filters Row */}
+            <Box sx={{
+                p: 2,
+                borderRadius: '20px',
+                background: 'rgba(255, 255, 255, 0.8)',
+                backdropFilter: 'blur(20px)',
+                border: '1px solid #e2e8f0', // Visible outline
+                boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+            }}>
+                <Grid container spacing={2} alignItems="center">
+                    <Grid item xs={12} sm={4} md={3}>
+                        <TextField
+                            id="time-period-select"
+                            name="time-period"
+                            select
+                            fullWidth
+                            size="small"
+                            label="Time Period"
+                            value={timePeriod}
+                            onChange={(e) => setTimePeriod(e.target.value as TimePeriod)}
+                            variant="outlined"
+                            sx={{
+                                '& .MuiOutlinedInput-root': {
+                                    borderRadius: '12px',
+                                    bgcolor: '#ffffff',
+                                }
+                            }}
+                        >
+                            <MenuItem value="day">Today</MenuItem>
+                            <MenuItem value="week">This Week</MenuItem>
+                            <MenuItem value="month">This Month</MenuItem>
+                            <MenuItem value="custom">Custom Range</MenuItem>
+                        </TextField>
                     </Grid>
-                    <Grid item xs={12} md={6}>
-                        <Card sx={{ borderRadius: '16px', bgcolor: alpha(theme.palette.error.main, 0.05), border: '1px solid', borderColor: alpha(theme.palette.error.main, 0.1) }}>
-                            <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                <Box sx={{ p: 1.5, borderRadius: '12px', bgcolor: 'error.main', color: 'white' }}>
-                                    <AbsentIcon />
-                                </Box>
-                                <Box>
-                                    <Typography variant="body2" color="text.secondary" fontWeight={600}>Total Absent Days</Typography>
-                                    <Typography variant="h4" fontWeight={800}>{summary.total_absent}</Typography>
-                                </Box>
-                            </CardContent>
-                        </Card>
+
+                    {timePeriod === 'custom' && (
+                        <>
+                            <Grid item xs={6} sm={4} md={3}>
+                                <TextField
+                                    id="date-from-input"
+                                    name="date-from"
+                                    type="date"
+                                    fullWidth
+                                    size="small"
+                                    label="From date"
+                                    value={dateFrom}
+                                    onChange={(e) => setDateFrom(e.target.value)}
+                                    sx={{
+                                        '& .MuiOutlinedInput-root': {
+                                            borderRadius: '12px',
+                                            bgcolor: '#ffffff',
+                                        }
+                                    }}
+                                />
+                            </Grid>
+                            <Grid item xs={6} sm={4} md={3}>
+                                <TextField
+                                    id="date-to-input"
+                                    name="date-to"
+                                    type="date"
+                                    fullWidth
+                                    size="small"
+                                    label="To date"
+                                    value={dateTo}
+                                    inputProps={{ min: dateFrom }}
+                                    onChange={(e) => setDateTo(e.target.value)}
+                                    sx={{
+                                        '& .MuiOutlinedInput-root': {
+                                            borderRadius: '12px',
+                                            bgcolor: '#ffffff',
+                                        }
+                                    }}
+                                />
+                            </Grid>
+                        </>
+                    )}
+
+
+                    <Grid item xs={12} sm={6} md={3}>
+                        <TextField
+                            id="employee-search-input"
+                            name="employee-search"
+                            size="small"
+                            fullWidth
+                            label="Search Employee (Name/ID)"
+                            placeholder="Type name or ID to filter..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            sx={{
+                                '& .MuiOutlinedInput-root': {
+                                    borderRadius: '12px',
+                                    bgcolor: '#ffffff',
+                                }
+                            }}
+                        />
                     </Grid>
-                </Grid>
-            )}
+                    <Grid item xs={12} sm={6} md={3}>
+                        <TextField
+                            id="attendance-type-select"
+                            name="attendance-type"
+                            select
+                            fullWidth
+                            size="small"
+                            label="Attendance Type"
+                            value={attendanceType}
+                            onChange={(e) => setAttendanceType(e.target.value)}
+                            sx={{
+                                '& .MuiOutlinedInput-root': {
+                                    borderRadius: '12px',
+                                    bgcolor: '#ffffff',
+                                }
+                            }}
+                        >
+                            <MenuItem value="all">All Types</MenuItem>
+                            <MenuItem value="Office">Office</MenuItem>
+                            <MenuItem value="Field">Field</MenuItem>
+                            <MenuItem value="Hybrid">Hybrid</MenuItem>
+                        </TextField>
+                    </Grid>
 
-            {/* Filters */}
-            <Card sx={{ borderRadius: '20px', border: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
-                <CardContent sx={{ p: 3 }}>
-                    <Grid container spacing={2} alignItems="flex-end">
-                        <Grid item xs={12} md={2}>
-                            <TextField
-                                select
-                                label="Time Period"
-                                fullWidth
-                                value={timePeriod}
-                                onChange={(e) => setTimePeriod(e.target.value as TimePeriod)}
-                            >
-                                <MenuItem value="day">Today</MenuItem>
-                                <MenuItem value="week">This Week</MenuItem>
-                                <MenuItem value="month">This Month</MenuItem>
-                                <MenuItem value="custom">Custom Range</MenuItem>
-                            </TextField>
-                        </Grid>
-
-                        <Grid item xs={12} md={2}>
-                            <TextField
-                                select
-                                label="Employee"
-                                fullWidth
-                                value={selectedEmployee}
-                                onChange={(e) => setSelectedEmployee(e.target.value)}
-                            >
-                                <MenuItem value="all">All Employees</MenuItem>
-                                {filterOptions.employees.map((emp) => (
-                                    <MenuItem key={emp.employee_id} value={emp.employee_id}>
-                                        {emp.full_name}
-                                    </MenuItem>
-                                ))}
-                            </TextField>
-                        </Grid>
-
-                        <Grid item xs={12} md={2}>
-                            <TextField
-                                select
-                                label="Type"
-                                fullWidth
-                                value={attendanceType}
-                                onChange={(e) => setAttendanceType(e.target.value)}
-                            >
-                                <MenuItem value="all">All Types</MenuItem>
-                                <MenuItem value="Office">Office</MenuItem>
-                                <MenuItem value="Field">Field</MenuItem>
-                                <MenuItem value="Hybrid">Hybrid</MenuItem>
-                            </TextField>
-                        </Grid>
-
-                        {timePeriod === 'custom' && (
-                            <>
-                                <Grid item xs={12} md={2.5}>
-                                    <TextField
-                                        type="date"
-                                        label="From"
-                                        fullWidth
-                                        InputLabelProps={{ shrink: true }}
-                                        value={dateFrom}
-                                        onChange={(e) => setDateFrom(e.target.value)}
-                                    />
-                                </Grid>
-                                <Grid item xs={12} md={2.5}>
-                                    <TextField
-                                        type="date"
-                                        label="To"
-                                        fullWidth
-                                        InputLabelProps={{ shrink: true }}
-                                        value={dateTo}
-                                        inputProps={{ min: dateFrom }}
-                                        onChange={(e) => setDateTo(e.target.value)}
-                                    />
-                                </Grid>
-                            </>
-                        )}
-
-                        <Grid item xs={12} md={1}>
+                    <Grid item xs={6} sm={2} md={1}>
+                        <Stack direction="row" spacing={1} justifyContent="center" alignItems="center" sx={{ height: '100%' }}>
                             <Tooltip title="Reset Filters">
-                                <IconButton onClick={() => {
-                                    setTimePeriod('day');
-                                    setSelectedEmployee('all');
-                                    setAttendanceType('all');
-                                    const today = new Date().toISOString().split('T')[0];
-                                    setDateFrom(today);
-                                    setDateTo(today);
-                                }} sx={{ height: 56, width: 56, borderRadius: '12px', border: '1px solid', borderColor: 'divider' }}>
-                                    <ClearIcon />
+                                <IconButton
+                                    aria-label="Reset all filters"
+                                    onClick={() => {
+                                        setTimePeriod('day');
+                                        setSearchTerm('');
+                                        setAttendanceType('all');
+                                        setSelectedEmployee('all');
+                                        const today = new Date().toISOString().split('T')[0];
+                                        setDateFrom(today);
+                                        setDateTo(today);
+                                        handleCloseDetails();
+                                    }}
+                                    sx={{
+                                        height: 38, width: 38, borderRadius: '12px', border: '1px solid #f1f5f9',
+                                        transition: 'all 0.2s',
+                                        '&:hover': { bgcolor: '#fef2f2', color: '#ef4444', borderColor: '#fecaca' }
+                                    }}
+                                >
+                                    <ClearIcon fontSize="small" />
                                 </IconButton>
                             </Tooltip>
-                        </Grid>
+                        </Stack>
                     </Grid>
-                </CardContent>
-            </Card>
+                </Grid>
+            </Box>
+
+
+
 
             {/* Report Table */}
             {generating ? (
@@ -553,164 +728,235 @@ export default function Reports() {
                     <Typography color="error" fontWeight={600}>{error}</Typography>
                 </Box>
             ) : (
-                <Card sx={{ borderRadius: '20px', overflow: 'hidden', border: '1px solid', borderColor: 'divider', boxShadow: 'none' }}>
-                    <Box sx={{ overflowX: 'auto' }}>
-                        <Table sx={{ minWidth: 900 }}>
-                            <TableHead>
-                                <TableRow sx={{ bgcolor: 'action.hover' }}>
-                                    <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Employee Name</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Type</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Login</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Logout</TableCell>
-                                    <TableCell sx={{ fontWeight: 700 }}>Duration</TableCell>
-                                    <TableCell align="center" sx={{ fontWeight: 700 }}>Details</TableCell>
-                                </TableRow>
-                            </TableHead>
-                            <TableBody>
-                                {reportRecords.length > 0 ? reportRecords.map((row, idx) => (
-                                    <TableRow key={idx} hover>
-                                        <TableCell sx={{ fontWeight: 600 }}>{formatDate(row.date)}</TableCell>
-                                        <TableCell>
-                                            <Typography variant="body2" fontWeight={700}>{row.full_name}</Typography>
-                                            <Typography variant="caption" color="text.secondary">{row.employee_id}</Typography>
-                                        </TableCell>
-                                        <TableCell>
-                                            <Chip label={row.attendance_type} size="small" variant="outlined" sx={{ fontWeight: 700, fontSize: '0.7rem' }} />
-                                        </TableCell>
-                                        <TableCell>{formatTime(row.first_login)}</TableCell>
-                                        <TableCell>{row.is_active ? <Chip label="Still In" size="small" color="success" /> : formatTime(row.last_login)}</TableCell>
-                                        <TableCell sx={{ fontWeight: 700, color: '#598791' }}>{row.formatted_duration}</TableCell>
-                                        <TableCell align="center">
-                                            <IconButton size="small" onClick={() => openDrillDown(row)}>
-                                                <ViewIcon fontSize="small" />
-                                            </IconButton>
-                                        </TableCell>
-                                    </TableRow>
-                                )) : (
-                                    <TableRow>
-                                        <TableCell colSpan={7} align="center" sx={{ py: 6 }}>
-                                            <Typography color="text.secondary">No records found for the selected period.</Typography>
-                                        </TableCell>
-                                    </TableRow>
-                                )}
-                            </TableBody>
-                        </Table>
-                    </Box>
-                </Card>
+                <ModernSummaryTable
+                    records={filteredSummaryRecords}
+                    onEmployeeClick={handleEmployeeClick}
+                    generating={generating}
+                />
             )}
 
-            {/* Drill-down Modal */}
-            <Dialog open={drillDownOpen} onClose={() => setDrillDownOpen(false)} maxWidth="md" fullWidth>
+            {/* Level 2 Modal: Employee Details */}
+            <Dialog
+                open={employeeDetailsOpen}
+                onClose={handleCloseDetails}
+                maxWidth="lg"
+                fullWidth
+                aria-labelledby="employee-details-title"
+                PaperProps={{
+                    sx: {
+                        borderRadius: '32px',
+                        background: 'rgba(255, 255, 255, 0.9)',
+                        backdropFilter: 'blur(20px)',
+                        border: '1px solid rgba(255, 255, 255, 0.3)',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.1)'
+                    }
+                }}
+            >
                 <DialogTitle>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Box>
-                            <Typography variant="h6" fontWeight={800}>Attendance Logs</Typography>
+                            <Typography id="employee-details-title" variant="h5" fontWeight={900}>{selectedEmployeeName}</Typography>
                             <Typography variant="body2" color="text.secondary">
-                                {selectedDayInfo?.full_name} | {formatDate(selectedDayInfo?.date)}
+                                Attendance Details for {selectedEmployee} | {formatDate(dateFrom)} to {formatDate(dateTo)}
                             </Typography>
                         </Box>
-                        <IconButton onClick={() => setDrillDownOpen(false)}><CloseIcon /></IconButton>
+                        <Stack direction="row" spacing={1} alignItems="center">
+                            <Tooltip title="Download this employee's report">
+                                <IconButton
+                                    onClick={(e) => {
+                                        (e.currentTarget as HTMLElement).blur();
+                                        setDownloadDialogOpen(true);
+                                    }}
+                                    sx={{
+                                        color: '#598791',
+                                        bgcolor: alpha('#598791', 0.05),
+                                        '&:hover': { bgcolor: alpha('#598791', 0.1) },
+                                        borderRadius: '12px'
+                                    }}
+                                >
+                                    <DownloadIcon fontSize="small" />
+                                </IconButton>
+                            </Tooltip>
+                            <IconButton
+                                aria-label="Close details"
+                                autoFocus
+                                onClick={handleCloseDetails}
+                                sx={{ bgcolor: alpha(theme.palette.error.main, 0.05), color: 'error.main', '&:hover': { bgcolor: alpha(theme.palette.error.main, 0.1) }, borderRadius: '12px' }}
+                            >
+                                <CloseIcon />
+                            </IconButton>
+                        </Stack>
                     </Box>
                 </DialogTitle>
                 <Divider />
-                <DialogContent>
-                    <Table size="small">
-                        <TableHead>
-                            <TableRow>
-                                <TableCell padding="checkbox">
-                                    <Checkbox
-                                        checked={selectedDaySessions.length > 0 && selectedSessionIds.length === selectedDaySessions.length}
-                                        indeterminate={selectedSessionIds.length > 0 && selectedSessionIds.length < selectedDaySessions.length}
-                                        onChange={handleSelectAll}
-                                    />
-                                </TableCell>
-                                <TableCell>Login</TableCell>
-                                <TableCell>Logout</TableCell>
-                                <TableCell>Location</TableCell>
-                                <TableCell>Type</TableCell>
-                                <TableCell align="right">Duration</TableCell>
-                            </TableRow>
-                        </TableHead>
-                        <TableBody>
-                            {selectedDaySessions.length > 0 ? selectedDaySessions.map((s: any, i: number) => (
-                                <TableRow key={i} hover selected={selectedSessionIds.includes(s.id)}>
-                                    <TableCell padding="checkbox">
-                                        <Checkbox
-                                            checked={selectedSessionIds.includes(s.id)}
-                                            onChange={() => handleSessionSelect(s.id)}
-                                        />
-                                    </TableCell>
-                                    <TableCell>{formatTime(s.check_in)}</TableCell>
-                                    <TableCell>{formatTime(s.check_out) || 'Active'}</TableCell>
-                                    <TableCell sx={{ minWidth: 200, py: 1.5 }}>
-                                        <Typography variant="body2" sx={{ whiteSpace: 'normal', lineBreak: 'anywhere' }}>
-                                            {s.entry_location_display}
-                                        </Typography>
-                                    </TableCell>
-                                    <TableCell>{s.is_field_work ? 'Field' : 'Office'}</TableCell>
-                                    <TableCell align="right" sx={{ fontWeight: 700 }}>{s.formatted_duration}</TableCell>
-                                </TableRow>
-                            )) : (
-                                <TableRow>
-                                    <TableCell colSpan={6} align="center" sx={{ py: 3 }}>
-                                        <Typography color="text.secondary">No sessions found for this date.</Typography>
-                                    </TableCell>
-                                </TableRow>
-                            )}
-                        </TableBody>
-                    </Table>
+                <DialogContent sx={{ px: 0, py: 0 }}>
+                    <Box sx={{ p: 4 }}>
+                        <Grid container spacing={3} sx={{ mb: 4 }}>
+                            <Grid item xs={12} md={6}>
+                                <Card sx={{
+                                    borderRadius: '20px',
+                                    background: `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.05)} 0%, transparent 100%)`,
+                                    border: '1px solid',
+                                    borderColor: alpha(theme.palette.success.main, 0.1)
+                                }}>
+                                    <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 2 }}>
+                                        <Box sx={{ p: 1, borderRadius: '12px', bgcolor: 'success.main', color: 'white' }}>
+                                            <PresentIcon fontSize="small" />
+                                        </Box>
+                                        <Box>
+                                            <Typography variant="caption" color="text.secondary" fontWeight={700}>PRESENT DAYS</Typography>
+                                            <Typography variant="h5" fontWeight={900}>{summary.total_present}</Typography>
+                                        </Box>
+                                    </CardContent>
+                                </Card>
+                            </Grid>
+                            <Grid item xs={12} md={6}>
+                                <Card sx={{
+                                    borderRadius: '20px',
+                                    background: `linear-gradient(135deg, ${alpha(theme.palette.error.main, 0.05)} 0%, transparent 100%)`,
+                                    border: '1px solid',
+                                    borderColor: alpha(theme.palette.error.main, 0.1)
+                                }}>
+                                    <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 2 }}>
+                                        <Box sx={{ p: 1, borderRadius: '12px', bgcolor: 'error.main', color: 'white' }}>
+                                            <AbsentIcon fontSize="small" />
+                                        </Box>
+                                        <Box>
+                                            <Typography variant="caption" color="text.secondary" fontWeight={700}>ABSENT DAYS</Typography>
+                                            <Typography variant="h5" fontWeight={900}>{summary.total_absent}</Typography>
+                                        </Box>
+                                    </CardContent>
+                                </Card>
+                            </Grid>
+                        </Grid>
+
+                        <ModernEmployeeDetailsTable
+                            records={reportRecords}
+                            onDrillDown={openDrillDown}
+                        />
+                    </Box>
                 </DialogContent>
-                <DialogActions sx={{ p: 2, justifyContent: 'space-between' }}>
-                    <Box>
-                        {selectedSessionIds.length > 0 && (
-                            <Typography variant="body2" color="text.secondary">
-                                {selectedSessionIds.length} session(s) selected
-                            </Typography>
-                        )}
-                    </Box>
-                    <Box>
-                        <Button 
-                            color="error" 
-                            startIcon={<DeleteIcon />} 
-                            onClick={openDeleteDialog}
-                            disabled={selectedSessionIds.length === 0}
-                            sx={{ mr: 1 }}
-                        >
-                            Delete Selected
-                        </Button>
-                        <Button onClick={() => setDrillDownOpen(false)}>Close</Button>
-                    </Box>
+                <DialogActions sx={{ p: 3 }}>
+                    <Button onClick={handleCloseDetails} sx={{ fontWeight: 800 }}>Close Details</Button>
                 </DialogActions>
             </Dialog>
 
-            {/* Delete Confirmation Dialog */}
-            <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-                <DialogTitle>Confirm Delete</DialogTitle>
-                <DialogContent>
-                    <Typography>
-                        Are you sure you want to delete {selectedSessionIds.length} selected session(s)? This action cannot be undone.
-                    </Typography>
+            {/* Level 3 Modal: Session Details Drill-down */}
+            <Dialog
+                open={drillDownOpen}
+                onClose={() => setDrillDownOpen(false)}
+                maxWidth="md"
+                fullWidth
+                aria-labelledby="drilldown-dialog-title"
+                PaperProps={{
+                    sx: {
+                        borderRadius: '32px',
+                        background: 'rgba(255, 255, 255, 0.9)',
+                        backdropFilter: 'blur(20px)',
+                        border: '1px solid rgba(255, 255, 255, 0.3)',
+                        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.1)'
+                    }
+                }}
+            >
+                <DialogTitle sx={{ py: { xs: 2, sm: 3 }, px: { xs: 2, sm: 3 } }}>
+                    <Box sx={{ display: 'flex', flexWrap: { xs: 'wrap', sm: 'nowrap' }, justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, sm: 2 } }}>
+                            <Box sx={{ display: { xs: 'none', sm: 'block' }, p: 1.5, borderRadius: '14px', bgcolor: alpha(theme.palette.primary.main, 0.1), color: 'primary.main' }}>
+                                <MonthIcon />
+                            </Box>
+                            <Box>
+                                <Typography id="drilldown-dialog-title" variant="h6" fontWeight={900} sx={{ lineHeight: 1.1, fontSize: { xs: '1rem', sm: '1.25rem' } }}>Attendance Logs</Typography>
+                                <Typography variant="body2" color="text.secondary" fontWeight={600} sx={{ fontSize: { xs: '0.75rem', sm: '0.875rem' } }}>
+                                    {selectedDayInfo?.full_name}
+                                </Typography>
+                            </Box>
+                        </Box>
+
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flex: 1 }}>
+                                <Box sx={{ flex: 1 }}>
+                                    <Typography variant="body2" fontWeight={900} sx={{ color: 'primary.dark', letterSpacing: '0.5px', fontSize: { xs: '0.7rem', sm: '0.8rem' } }}>
+                                        {selectedDayInfo ? formatDate(selectedDayInfo.date).toUpperCase() : ''}
+                                    </Typography>
+                                </Box>
+                                <Stack direction="row" spacing={0.5} alignItems="center">
+                                    <Button
+                                        size="small"
+                                        onClick={() => handleNavigateDate('prev')}
+                                        disabled={reportRecords.findIndex(r => r.date === selectedDayInfo?.date) <= 0}
+                                        sx={{
+                                            minWidth: 44,
+                                            height: 32,
+                                            px: 1,
+                                            fontSize: '0.75rem',
+                                            fontWeight: 600,
+                                            color: 'primary.main',
+                                            bgcolor: alpha(theme.palette.primary.main, 0.05),
+                                            border: '1px solid',
+                                            borderColor: alpha(theme.palette.primary.main, 0.1),
+                                            borderRadius: '8px',
+                                            '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) },
+                                            textTransform: 'none'
+                                        }}
+                                    >
+                                        Prev
+                                    </Button>
+                                    <Button
+                                        size="small"
+                                        onClick={() => handleNavigateDate('next')}
+                                        disabled={reportRecords.findIndex(r => r.date === selectedDayInfo?.date) >= reportRecords.length - 1}
+                                        sx={{
+                                            minWidth: 44,
+                                            height: 32,
+                                            px: 1,
+                                            fontSize: '0.75rem',
+                                            fontWeight: 600,
+                                            color: 'primary.main',
+                                            bgcolor: alpha(theme.palette.primary.main, 0.05),
+                                            border: '1px solid',
+                                            borderColor: alpha(theme.palette.primary.main, 0.1),
+                                            borderRadius: '8px',
+                                            '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.1) },
+                                            textTransform: 'none'
+                                        }}
+                                    >
+                                        Next
+                                    </Button>
+                                </Stack>
+                            </Box>
+                            <IconButton
+                                aria-label="Close logs"
+                                autoFocus
+                                onClick={() => setDrillDownOpen(false)}
+                                sx={{
+                                    bgcolor: alpha(theme.palette.error.main, 0.05),
+                                    color: 'error.main',
+                                    '&:hover': { bgcolor: alpha(theme.palette.error.main, 0.1) },
+                                    p: 0.75
+                                }}
+                            >
+                                <CloseIcon fontSize="small" />
+                            </IconButton>
+                        </Stack>
+                    </Box>
+                </DialogTitle>
+                <Divider />
+                <DialogContent sx={{ p: 0 }}>
+                    <ModernSessionLogTable sessions={selectedDaySessions} />
                 </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-                    <Button 
-                        color="error" 
-                        variant="contained" 
-                        onClick={handleDeleteSessions}
-                        disabled={deleting}
-                    >
-                        {deleting ? 'Deleting...' : 'Delete'}
-                    </Button>
+                <DialogActions sx={{ p: 3, justifyContent: 'flex-end', bgcolor: alpha(theme.palette.primary.main, 0.02) }}>
+                    <Button onClick={() => setDrillDownOpen(false)} sx={{ fontWeight: 800, textTransform: 'none' }}>Close</Button>
                 </DialogActions>
             </Dialog>
+
 
             {/* Download Dialog */}
-            <Dialog 
-                open={downloadDialogOpen} 
+            <Dialog
+                open={downloadDialogOpen}
                 onClose={() => !exporting && setDownloadDialogOpen(false)}
-                maxWidth="xs" 
+                maxWidth="xs"
                 fullWidth
+                aria-labelledby="download-dialog-title"
                 PaperProps={{
                     sx: { borderRadius: '20px', p: 1 }
                 }}
@@ -719,9 +965,14 @@ export default function Reports() {
                     <Stack direction="row" alignItems="center" justifyContent="space-between">
                         <Stack direction="row" alignItems="center" gap={1}>
                             <DownloadIcon color="primary" />
-                            <Typography variant="h6" fontWeight={800}>Download Report</Typography>
+                            <Typography id="download-dialog-title" variant="h6" fontWeight={800}>Download Report</Typography>
                         </Stack>
-                        <IconButton onClick={() => !exporting && setDownloadDialogOpen(false)} size="small">
+                        <IconButton
+                            aria-label="Close download dialog"
+                            autoFocus
+                            onClick={() => !exporting && setDownloadDialogOpen(false)}
+                            size="small"
+                        >
                             <CloseIcon />
                         </IconButton>
                     </Stack>
@@ -729,12 +980,14 @@ export default function Reports() {
                 <DialogContent>
                     <Stack spacing={3} sx={{ mt: 1 }}>
                         <TextField
+                            id="download-option-select"
                             select
                             fullWidth
                             label="What would you like to download?"
                             value={downloadOption}
-                            onChange={(e: any) => setDownloadOption(e.target.value as 'summary' | 'logs')}
+                            onChange={(e: any) => setDownloadOption(e.target.value as 'totals' | 'summary' | 'logs')}
                         >
+                            <MenuItem value="totals">Employee Attendance Totals (Present/Absent Count)</MenuItem>
                             <MenuItem value="summary">Summary Report (Aggregated View)</MenuItem>
                             <MenuItem value="logs">Detailed Attendance Logs (All Records)</MenuItem>
                         </TextField>
@@ -748,7 +1001,7 @@ export default function Reports() {
                             </Typography>
                             {selectedEmployee !== 'all' && (
                                 <Typography variant="body2">
-                                    Employee: {filterOptions.employees.find(e => e.employee_id === selectedEmployee)?.full_name || selectedEmployee}
+                                    Employee: {selectedEmployeeName || selectedEmployee}
                                 </Typography>
                             )}
                             {attendanceType !== 'all' && (
@@ -758,24 +1011,22 @@ export default function Reports() {
                             )}
                         </Box>
 
-                        <Typography variant="body2" color="text.secondary">
-                            Downloading <b>{downloadOption === 'summary' ? 'Summary' : 'Detailed Records'}</b> for the current filters.
-                        </Typography>
+
                     </Stack>
                 </DialogContent>
                 <DialogActions sx={{ p: 2, gap: 1 }}>
-                    <Button 
-                        fullWidth 
-                        variant="outlined" 
-                        onClick={() => downloadOption === 'summary' ? handleDownloadCSV() : handleDownloadDetailedLogs('csv')}
+                    <Button
+                        fullWidth
+                        variant="outlined"
+                        onClick={() => handleDownloadCSV()}
                         disabled={exporting}
                     >
                         CSV
                     </Button>
-                    <Button 
-                        fullWidth 
-                        variant="contained" 
-                        onClick={() => downloadOption === 'summary' ? handleDownloadPDF() : handleDownloadDetailedLogs('pdf')}
+                    <Button
+                        fullWidth
+                        variant="contained"
+                        onClick={() => handleDownloadPDF()}
                         disabled={exporting}
                     >
                         {exporting ? 'Processing...' : 'PDF'}
