@@ -8,9 +8,49 @@
   font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
 }
 
+html {
+  scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
-  @apply bg-gray-100 text-gray-900 overflow-x-hidden;
+  @apply bg-gray-100 text-gray-900;
   font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Safe area support for mobile devices */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .mb-safe {
+    margin-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Mobile-specific safe area utilities */
+.pb-safe {
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+.mb-safe {
+  margin-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+/* Prevent iOS Safari viewport height issues */
+html, body, #root {
+  height: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
+}
+
+/* Fix for mobile Safari 100dvh issue */
+@supports (-webkit-touch-callout: none) {
+  .min-h-\[100dvh\] {
+    min-height: -webkit-fill-available;
+  }
 }
 
 @layer components {
@@ -23,12 +63,22 @@ body {
   }
 }
 
-/* Global Button Hover Color */
-button:hover,
-a:hover {
-  background-color: #e6ffff !important;
-  color: #009999 !important;
-  transition: all 0.2s ease-in-out;
+/* Global Button Hover Color - Desktop only */
+@media (hover: hover) and (pointer: fine) {
+  button:hover,
+  a:hover {
+    background-color: #e6ffff !important;
+    color: #009999 !important;
+    transition: all 0.2s ease-in-out;
+  }
+}
+
+/* Touch-friendly active states for mobile */
+button:active,
+a:active {
+  opacity: 0.8;
+  transform: scale(0.98);
+  transition: all 0.1s ease-out;
 }
 
 

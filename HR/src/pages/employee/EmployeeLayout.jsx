@@ -107,11 +107,11 @@ export default function EmployeeLayout() {
     navigate("/login");
   };
 
-  // ✅ Simple route guard removed as App.jsx 이제 handles routing
+  // ✅ Simple route guard removed as App.jsx handles routing
   // Role based access is simplified
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-[100dvh] bg-gray-50 flex">
       {/* Mobile backdrop */}
       {isMobileOpen && (
         <div
@@ -120,7 +120,7 @@ export default function EmployeeLayout() {
         />
       )}
       <aside
-        className={`bg-white border-r h-screen fixed md:sticky inset-y-0 left-0 top-0 z-50 transition-all duration-300 ease-in-out
+        className={`bg-white border-r min-h-[100dvh] fixed md:sticky inset-y-0 left-0 top-0 z-50 transition-all duration-300 ease-in-out
           ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
           w-[280px] ${isSidebarOpen ? 'md:w-[280px]' : 'md:w-[72px]'}`}
       >
@@ -223,10 +223,10 @@ export default function EmployeeLayout() {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col">
-        <header className="bg-white border-b sticky top-0 z-40">
-          <div className="px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+      <main className="flex-1 flex flex-col min-w-0">
+        <header className="bg-white border-b sticky top-0 z-40 shrink-0">
+          <div className="px-4 md:px-6 py-3 md:py-4 flex items-center justify-between">
+            <div className="flex items-center gap-2 md:gap-3">
               <button
                 type="button"
                 onClick={() => {
@@ -247,21 +247,20 @@ export default function EmployeeLayout() {
               <NavLink
                 to="profile"
                 className={({ isActive }) =>
-                  `inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${isActive
+                  `inline-flex items-center gap-2 rounded-xl px-2 md:px-3 py-2 text-xs md:text-sm font-semibold transition ${isActive
                     ? "bg-gray-900 text-white shadow"
                     : "text-gray-700 hover:bg-gray-100"
-                  }`
-                }
+                  }`}
               >
                 <UserRound size={16} />
-                My Profile
+                <span className="hidden sm:inline">My Profile</span>
               </NavLink>
             </div>
           </div>
         </header>
 
-        <div className="p-6 flex-1">
-          <div className="bg-white rounded-2xl shadow-sm border p-6">
+        <div className="p-4 md:p-6 flex-1 overflow-y-auto pb-safe">
+          <div className="bg-white rounded-2xl shadow-sm border p-4 md:p-6">
             <Outlet />
           </div>
         </div>
@@ -269,5 +268,3 @@ export default function EmployeeLayout() {
     </div>
   );
 }
-
-

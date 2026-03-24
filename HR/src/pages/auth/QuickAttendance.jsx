@@ -373,7 +373,7 @@ export default function QuickAttendance() {
     };
 
     return (
-        <div className="min-h-screen relative flex items-center justify-center font-sans overflow-hidden">
+        <div className="min-h-[100dvh] relative flex items-center justify-center font-sans overflow-y-auto">
             <div
                 className="absolute inset-0 bg-cover bg-center bg-no-repeat"
                 style={{ backgroundImage: `url(background.png)` }}
@@ -381,16 +381,16 @@ export default function QuickAttendance() {
             <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
 
             {submitted && (
-                <div className="absolute inset-0 z-[100] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
-                    <div className="bg-white rounded-3xl shadow-2xl border p-12 max-w-md w-full text-center animate-in zoom-in duration-300">
-                        <div className="mb-6 flex justify-center">
-                            <div className="p-4 bg-green-100 rounded-full text-green-600">
-                                <CheckCircle size={60} />
+                <div className="absolute inset-0 z-[100] flex items-center justify-center p-4 md:p-6 bg-black/40 backdrop-blur-sm animate-in fade-in duration-300">
+                    <div className="bg-white rounded-3xl shadow-2xl border p-6 md:p-12 max-w-md w-full text-center animate-in zoom-in duration-300">
+                        <div className="mb-4 md:mb-6 flex justify-center">
+                            <div className="p-3 md:p-4 bg-green-100 rounded-full text-green-600">
+                                <CheckCircle size={40} className="md:w-[60px] md:h-[60px]" />
                             </div>
                         </div>
-                        <h3 className="text-2xl font-bold text-gray-800 mb-2">Success!</h3>
-                        <p className="text-xl font-semibold text-indigo-600 mb-4">{successMessage?.split(' - ')[0]}</p>
-                        <p className="text-gray-600 mb-8">{successMessage?.split(' - ')[1] || successMessage}</p>
+                        <h3 className="text-xl md:text-2xl font-bold text-gray-800 mb-2">Success!</h3>
+                        <p className="text-lg md:text-xl font-semibold text-indigo-600 mb-2 md:mb-4">{successMessage?.split(' - ')[0]}</p>
+                        <p className="text-gray-600 mb-4 md:mb-8">{successMessage?.split(' - ')[1] || successMessage}</p>
                         <p className="text-gray-400 text-xs italic font-medium">Ready for next user in a second...</p>
                     </div>
                 </div>
@@ -401,15 +401,15 @@ export default function QuickAttendance() {
                     stopCamera();
                     navigate("/login", { replace: true });
                 }}
-                className="absolute top-8 left-8 z-50 p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all hover:scale-110 active:scale-95 shadow-lg backdrop-blur-md border border-white/20"
+                className="absolute top-4 left-4 md:top-8 md:left-8 z-50 p-2.5 md:p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition-all hover:scale-110 active:scale-95 shadow-lg backdrop-blur-md border border-white/20"
                 title="Back to Dashboard"
             >
-                <ArrowLeft size={24} />
+                <ArrowLeft size={20} className="md:w-6 md:h-6" />
             </button>
 
-            <div className="relative z-10 w-full max-w-2xl px-3 sm:px-6 py-6 sm:py-12 animate-in fade-in slide-in-from-bottom-5 duration-700">
-                <div className="bg-white rounded-[32px] shadow-2xl border-none overflow-hidden">
-                    <div className="p-5 sm:p-10">
+            <div className="relative z-10 w-full max-w-2xl px-3 sm:px-6 py-4 md:py-8 my-4 animate-in fade-in slide-in-from-bottom-5 duration-700">
+                <div className="bg-white rounded-[24px] md:rounded-[32px] shadow-2xl border-none overflow-hidden">
+                    <div className="p-4 md:p-10">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                 <div>
                                     <h2 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">My Attendance</h2>

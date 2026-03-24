@@ -3,15 +3,15 @@ import { NavLink } from "react-router-dom";
 import { Menu, UserRound } from "lucide-react";
 
 const linkClasses = ({ isActive }) =>
-  `inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition ${isActive
+  `inline-flex items-center gap-2 px-2 md:px-3 py-2 rounded-lg text-xs md:text-sm font-semibold transition ${isActive
     ? "bg-[#598791] text-white shadow"
     : "text-gray-700 hover:bg-[#f8f1f1] hover:text-[#598791]"
   }`;
 
 const Navbar = ({ isSidebarOpen = true, onToggleSidebar }) => {
   return (
-    <header className="h-14 bg-white border-b flex items-center justify-between px-6">
-      <div className="flex items-center gap-3">
+    <header className="h-14 bg-white border-b flex items-center justify-between px-4 md:px-6 shrink-0">
+      <div className="flex items-center gap-2 md:gap-3">
         <button
           type="button"
           onClick={onToggleSidebar}
@@ -22,10 +22,10 @@ const Navbar = ({ isSidebarOpen = true, onToggleSidebar }) => {
           <Menu size={18} />
         </button>
       </div>
-      <div className="flex items-center gap-3 text-sm">
+      <div className="flex items-center gap-2 md:gap-3 text-xs md:text-sm">
         <NavLink to="/dashboard/profile" className={linkClasses}>
           <UserRound size={16} />
-          My Profile
+          <span className="hidden sm:inline">My Profile</span>
         </NavLink>
       </div>
     </header>

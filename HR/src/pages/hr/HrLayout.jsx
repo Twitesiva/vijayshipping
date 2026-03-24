@@ -114,7 +114,7 @@ export default function HrLayout() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-[100dvh] bg-gray-50 flex">
       {/* Mobile backdrop */}
       {isMobileOpen && (
         <div
@@ -124,7 +124,7 @@ export default function HrLayout() {
       )}
       {/* SIDEBAR */}
       <aside
-        className={`bg-white border-r h-screen fixed md:sticky inset-y-0 left-0 top-0 z-50 transition-all duration-300 ease-in-out
+        className={`bg-white border-r min-h-[100dvh] fixed md:sticky inset-y-0 left-0 top-0 z-50 transition-all duration-300 ease-in-out
           ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
           w-[280px] ${isSidebarOpen ? 'md:w-[280px]' : 'md:w-[72px]'}`}
       >
@@ -307,11 +307,11 @@ export default function HrLayout() {
       </aside>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 min-w-0">
+      <main className="flex-1 min-w-0 flex flex-col">
         {/* Optional: top bar in content area */}
-        <header className="bg-white border-b sticky top-0 z-40">
-          <div className="px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+        <header className="bg-white border-b sticky top-0 z-40 shrink-0">
+          <div className="px-4 md:px-6 py-3 md:py-4 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 md:gap-3">
               <button
                 type="button"
                 onClick={() => {
@@ -327,7 +327,7 @@ export default function HrLayout() {
               >
                 <Menu size={18} />
               </button>
-              <div className="text-sm text-gray-500">
+              <div className="text-xs md:text-sm text-gray-500 hidden sm:block">
                 {pathname.startsWith("/manager-dashboard") ? "Manager Dashboard" :
                   pathname.startsWith("/founder-dashboard") ? "Founder Dashboard" :
                     "HR Dashboard"}
@@ -341,20 +341,20 @@ export default function HrLayout() {
                       "/hr-dashboard/profile"
                 }
                 className={({ isActive }) =>
-                  `inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition ${isActive
+                  `inline-flex items-center gap-2 rounded-xl px-2 md:px-3 py-2 text-xs md:text-sm font-semibold transition ${isActive
                     ? "bg-[#598791] text-white shadow"
                     : "text-gray-700 hover:bg-[#f8f1f1] hover:text-[#598791]"
                   }`}
               >
                 <UserRound size={16} />
-                My Profile
+                <span className="hidden sm:inline">My Profile</span>
               </NavLink>
             </div>
           </div>
         </header>
 
-        <div className="p-6">
-          <div className="bg-white rounded-2xl shadow-sm border p-6">
+        <div className="p-4 md:p-6 flex-1 overflow-y-auto pb-safe">
+          <div className="bg-white rounded-2xl shadow-sm border p-4 md:p-6">
             <Outlet />
           </div>
         </div>

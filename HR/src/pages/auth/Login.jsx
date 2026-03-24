@@ -437,7 +437,7 @@ export default function Login() {
     "https://images.unsplash.com/photo-1498050108023-c5249f4df085?auto=format&fit=crop&w=1400&q=60";
 
   return (
-    <div className="h-screen w-screen flex items-center justify-center relative font-sans overflow-hidden">
+    <div className="min-h-[100dvh] w-full flex items-center justify-center relative font-sans overflow-y-auto">
       {/* Dynamic Background Image */}
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-1000"
@@ -447,21 +447,21 @@ export default function Login() {
       <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />
 
       {/* Main Glass Container */}
-      <div className="relative z-10 w-full max-w-6xl h-full max-h-[min(750px,95vh)] bg-white/10 rounded-[30px] md:rounded-[40px] border border-white/20 shadow-2xl flex flex-col md:flex-row items-center overflow-hidden p-4 md:p-8 gap-6 md:gap-10">
+      <div className="relative z-10 w-full max-w-6xl min-h-[100dvh] md:min-h-0 bg-white/10 rounded-[20px] md:rounded-[40px] border border-white/20 shadow-2xl flex flex-col md:flex-row items-center overflow-hidden p-4 md:p-8 gap-4 md:gap-10 my-4 md:my-8">
 
         {/* LEFT AREA: Title and Cards Section */}
-        <div className="w-full flex flex-col gap-8 items-center justify-center">
+        <div className="w-full flex flex-col gap-4 md:gap-8 items-center justify-center">
 
-          <div className="text-center">
-            <h2 className="text-2xl md:text-3xl font-black text-white leading-tight tracking-tight uppercase drop-shadow-xl">
+          <div className="text-center px-2">
+            <h2 className="text-xl md:text-3xl font-black text-white leading-tight tracking-tight uppercase drop-shadow-xl">
               ATTENDANCE MANAGEMENT SYSTEM
             </h2>
           </div>
 
-          <div className="w-full flex flex-col md:flex-row gap-6 md:gap-8 items-center md:items-stretch justify-center">
+          <div className="w-full flex flex-col md:flex-row gap-4 md:gap-8 items-center md:items-stretch justify-center">
             {/* 1. Login Card */}
             <div className="w-full max-w-[380px] flex flex-col gap-4 items-center">
-              <div className="w-full bg-white rounded-[24px] md:rounded-[32px] shadow-2xl p-6 md:p-8 flex flex-col items-center overflow-y-auto max-h-full">
+              <div className="w-full bg-white rounded-[24px] md:rounded-[32px] shadow-2xl p-4 md:p-8 flex flex-col items-center overflow-y-auto max-h-[70vh] md:max-h-full">
                 <div className="w-full">
                   <div className="flex justify-center mb-1">
                     <div className="p-3 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center">

@@ -35,7 +35,7 @@ const DashboardLayout = () => {
   };
 
   return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden">
+    <div className="flex min-h-[100dvh] bg-gray-100">
       {/* Mobile backdrop */}
       {isMobileOpen && (
         <div
@@ -44,12 +44,12 @@ const DashboardLayout = () => {
         />
       )}
       <Sidebar isOpen={isSidebarOpen} isMobileOpen={isMobileOpen} />
-      <div className="flex flex-1 flex-col min-h-0">
+      <div className="flex flex-1 flex-col min-h-0 w-full">
         <Navbar
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={handleToggle}
         />
-        <main className="p-6 flex-1 overflow-y-auto">
+        <main className="p-4 md:p-6 flex-1 overflow-y-auto pb-safe">
           <Outlet />
         </main>
       </div>
