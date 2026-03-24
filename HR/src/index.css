@@ -6,11 +6,14 @@
 *::before,
 *::after {
   font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
+  box-sizing: border-box;
 }
 
 html {
   scroll-behavior: smooth;
   -webkit-tap-highlight-color: transparent;
+  /* Prevent text size adjustment on orientation change */
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -18,52 +21,216 @@ body {
   font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif !important;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Prevent pull-to-refresh on iOS */
+  overscroll-behavior-y: none;
 }
+
+/* ============================================
+   SAFARI/iOS SPECIFIC FIXES
+   ============================================ */
 
 /* Safe area support for mobile devices */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
   }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .pl-safe {
+    padding-left: env(safe-area-inset-left);
+  }
+  .pr-safe {
+    padding-right: env(safe-area-inset-right);
+  }
   .mb-safe {
     margin-bottom: env(safe-area-inset-bottom);
   }
 }
 
-/* Mobile-specific safe area utilities */
+/* Fallback safe area for older iOS */
 .pb-safe {
-  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+}
+
+.pt-safe {
+  padding-top: max(16px, env(safe-area-inset-top, 0px));
+}
+
+.pl-safe {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+}
+
+.pr-safe {
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
 
 .mb-safe {
-  margin-bottom: max(16px, env(safe-area-inset-bottom));
+  margin-bottom: max(16px, env(safe-area-inset-bottom, 0px));
 }
 
-/* Prevent iOS Safari viewport height issues */
+/* ============================================
+   VIEWPORT HEIGHT FIXES FOR SAFARI
+   ============================================ */
+
+/* Fix for iOS Safari 100dvh issue */
+@supports (-webkit-touch-callout: none) {
+  /* iOS Safari specific */
+  html, body, #root {
+    height: 100%;
+    min-height: 100%;
+    min-height: -webkit-fill-available;
+  }
+  
+  .min-h-\[100dvh\] {
+    min-height: -webkit-fill-available;
+    min-height: 100dvh;
+  }
+  
+  .h-screen {
+    height: -webkit-fill-available;
+    height: 100dvh;
+  }
+  
+  .h-\[100dvh\] {
+    height: -webkit-fill-available;
+    height: 100dvh;
+  }
+}
+
+/* Fallback for all browsers */
 html, body, #root {
   height: 100%;
   min-height: 100%;
   min-height: 100dvh;
 }
 
-/* Fix for mobile Safari 100dvh issue */
-@supports (-webkit-touch-callout: none) {
-  .min-h-\[100dvh\] {
-    min-height: -webkit-fill-available;
-  }
+/* ============================================
+   FLEXBOX FIXES FOR SAFARI
+   ============================================ */
+
+/* Ensure flex children don't overflow */
+.flex-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-height: -webkit-fill-available;
 }
+
+/* Fix for flex children that don't shrink properly */
+.flex-child {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ============================================
+   INPUT & BUTTON FIXES FOR SAFARI
+   ============================================ */
+
+/* Prevent iOS Safari input zoom (minimum 16px) */
+input, select, textarea {
+  font-size: 16px !important;
+}
+
+/* Fix for iOS Safari button styling */
+button {
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: inherit;
+}
+
+/* Fix for iOS Safari focus outline */
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid #009999;
+  outline-offset: 2px;
+}
+
+/* Fix for iOS Safari tap highlight */
+a, button, input, select, textarea {
+  -webkit-tap-highlight-color: rgba(0, 153, 153, 0.2);
+}
+
+/* ============================================
+   SCROLL FIXES FOR SAFARI
+   ============================================ */
+
+/* Smooth scrolling with momentum on iOS */
+.scroll-container {
+  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Hide scrollbar but keep functionality */
+.scroll-container::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+.scroll-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-container::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+/* ============================================
+   STICKY/FIXED POSITION FIXES
+   ============================================ */
+
+/* Fix for Safari sticky positioning */
+.sticky-header {
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+/* Fix for Safari fixed positioning with safe area */
+.fixed-with-safe-area {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+}
+
+/* ============================================
+   WIDTH FIXES FOR SAFARI
+   ============================================ */
+
+/* Ensure full width works properly */
+.w-full {
+  width: 100%;
+  width: -webkit-fill-available;
+}
+
+/* ============================================
+   COMPONENT STYLES
+   ============================================ */
 
 @layer components {
   .input {
     @apply w-full rounded-xl border p-2;
+    /* Ensure input doesn't zoom on iOS */
+    font-size: 16px;
   }
 
   .btn-primary {
     @apply rounded-xl bg-blue-600 px-4 py-2 text-white;
+    /* Ensure button is at least 44px touch target on iOS */
+    min-height: 44px;
   }
 }
 
-/* Global Button Hover Color - Desktop only */
+/* Global Button Hover - Desktop only */
 @media (hover: hover) and (pointer: fine) {
   button:hover,
   a:hover {
@@ -81,18 +248,18 @@ a:active {
   transition: all 0.1s ease-out;
 }
 
+/* ============================================
+   ANIMATIONS
+   ============================================ */
 
-/* Professional Preloader Animations */
 @layer utilities {
   @keyframes progress {
     0% {
       transform: translateX(-100%);
     }
-
     50% {
       transform: translateX(0%);
     }
-
     100% {
       transform: translateX(100%);
     }
@@ -102,7 +269,6 @@ a:active {
     0% {
       background-position: -1000px 0;
     }
-
     100% {
       background-position: 1000px 0;
     }
@@ -113,7 +279,6 @@ a:active {
       opacity: 0;
       transform: translateY(10px);
     }
-
     to {
       opacity: 1;
       transform: translateY(0);
