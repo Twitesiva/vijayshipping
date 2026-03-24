@@ -120,9 +120,10 @@ export default function EmployeeLayout() {
         />
       )}
       <aside
-        className={`bg-white border-r min-h-[100dvh] fixed md:sticky inset-y-0 left-0 top-0 z-50 transition-all duration-300 ease-in-out
+        className={`bg-white border-r shadow-sm flex flex-col fixed inset-y-0 left-0 top-0 z-50 transition-all duration-300 ease-in-out
           ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-          w-[280px] ${isSidebarOpen ? 'md:w-[280px]' : 'md:w-[72px]'}`}
+          w-[280px] ${isSidebarOpen ? 'md:w-[280px]' : 'md:w-[72px]'}
+          min-h-[100dvh]`}
       >
         <div className="h-full flex flex-col overflow-hidden">
           <div className={`p-5 border-b flex items-center gap-3 ${isSidebarOpen ? 'justify-between' : 'justify-center'}`}>
@@ -223,7 +224,7 @@ export default function EmployeeLayout() {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0">
+      <main className="flex-1 flex flex-col min-w-0 md:ml-[280px]">
         <header className="bg-white border-b sticky top-0 z-40 shrink-0">
           <div className="px-4 md:px-6 py-3 md:py-4 flex items-center justify-between">
             <div className="flex items-center gap-2 md:gap-3">

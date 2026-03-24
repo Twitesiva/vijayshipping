@@ -36,20 +36,24 @@ const DashboardLayout = () => {
 
   return (
     <div className="flex min-h-[100dvh] bg-gray-100">
-      {/* Mobile backdrop */}
+      {/* Mobile backdrop overlay - appears when sidebar is open on mobile */}
       {isMobileOpen && (
         <div
           className="fixed inset-0 z-40 bg-black/50 md:hidden"
           onClick={() => setIsMobileOpen(false)}
         />
       )}
+      
+      {/* Fixed Sidebar - always fixed, slides in/out on mobile */}
       <Sidebar isOpen={isSidebarOpen} isMobileOpen={isMobileOpen} />
-      <div className="flex flex-1 flex-col min-h-0 w-full">
+      
+      {/* Main content - has left margin on desktop to account for fixed sidebar */}
+      <div className="flex flex-col flex-1 min-h-0 w-full md:ml-[280px]">
         <Navbar
           isSidebarOpen={isSidebarOpen}
           onToggleSidebar={handleToggle}
         />
-        <main className="p-4 md:p-6 flex-1 overflow-y-auto pb-safe">
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-safe">
           <Outlet />
         </main>
       </div>
@@ -58,5 +62,3 @@ const DashboardLayout = () => {
 };
 
 export default DashboardLayout;
-
-

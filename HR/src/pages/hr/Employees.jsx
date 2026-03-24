@@ -5,6 +5,7 @@ import { Eye, EyeOff, Trash2, KeyRound, X, User, UserMinus, Upload, FileText, Pe
 import { supabase, isSupabaseConfigured } from "../../lib/supabaseClient.js";
 import EditProfileModal from "./HrEditModal.jsx";
 import { formatDDMMYYYY } from "../../lib/dateUtils.js";
+import { API_BASE } from "../../config.js";
 
 /* ---------------------- SAMPLE DATA ---------------------- */
 // Removed hardcoded employee details
@@ -388,9 +389,8 @@ export default function Employees() {
     try {
       // Assuming setSaving is a state setter for a loading indicator
       // If not defined, you might need to add it or remove this line.
-      // setSaving(true); 
-      const API_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-      const response = await fetch(`${API_URL}/api/v1/admin/delete-employee/${eid}`, {
+      // setSaving(true);
+      const response = await fetch(`${API_BASE}/admin/delete-employee/${eid}`, {
         method: "DELETE",
       });
 
@@ -467,8 +467,7 @@ export default function Employees() {
 
       console.log("[handleSaveEdit] Final payload for backend:", payload);
 
-      const API_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
-      const response = await fetch(`${API_URL}/api/v1/admin/employees/${up.id}`, {
+      const response = await fetch(`${API_BASE}/admin/employees/${up.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

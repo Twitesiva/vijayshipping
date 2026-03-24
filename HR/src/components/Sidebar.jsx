@@ -46,9 +46,10 @@ const Sidebar = ({ isOpen = true, isMobileOpen = false }) => {
 
   return (
     <aside
-      className={`bg-white border-r shadow-sm flex flex-col min-h-[100dvh] fixed md:sticky inset-y-0 left-0 top-0 z-50 transition-all duration-300
+      className={`bg-white border-r shadow-sm flex flex-col fixed inset-y-0 left-0 top-0 z-50 transition-all duration-300
         ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-        ${isOpen ? 'w-[280px] md:w-[280px]' : 'w-[280px] md:w-[72px]'}`}
+        ${isOpen ? 'w-[280px] md:w-[280px]' : 'w-[280px] md:w-[72px]'}
+        min-h-[100dvh]`}
     >
       <div
         className={`p-5 border-b flex items-center h-[70px] ${isOpen ? "justify-start" : "justify-center"

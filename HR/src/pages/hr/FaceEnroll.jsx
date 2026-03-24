@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import API_BASE_URL from "../../config";
-
-const API = `${API_BASE_URL}/api/v1`;
+import { API_BASE } from "../../config";
 
 export default function FaceEnroll() {
   const [query, setQuery] = useState("");
@@ -21,7 +19,7 @@ export default function FaceEnroll() {
   // ── Fetch employees ──
   const refreshEmployeeList = useCallback(async () => {
     try {
-      const res = await fetch(`${API}/admin/employees`);
+      const res = await fetch(`${API_BASE}/admin/employees`);
       const data = await res.json();
       const cleanedEmployees = (data.employees || []).map(emp => ({
         ...emp,
@@ -98,7 +96,7 @@ export default function FaceEnroll() {
     setMessage("");
 
     try {
-      const res = await fetch(`${API}/attendance/check-enrollment/${emp.employee_id}`);
+      const res = await fetch(`${API_BASE}/attendance/check-enrollment/${emp.employee_id}`);
 
       if (res.ok) {
         // NOT ENROLLED
@@ -130,7 +128,7 @@ export default function FaceEnroll() {
   const handleDelete = async (emp) => {
     if (!window.confirm(`Delete enrollment for ${emp.full_name}?`)) return;
 
-    const res = await fetch(`${API}/admin/delete-face-enrollment/${emp.employee_id}`, {
+    const res = await fetch(`${API_BASE}/admin/delete-face-enrollment/${emp.employee_id}`, {
       method: "DELETE",
     });
 
@@ -171,12 +169,12 @@ export default function FaceEnroll() {
     try {
       // Delete old enrollment first if in update mode
       if (updateMode) {
-        await fetch(`${API}/admin/delete-face-enrollment/${selectedEmployee.employee_id}`, {
+        await fetch(`${API_BASE}/admin/delete-face-enrollment/${selectedEmployee.employee_id}`, {
           method: "DELETE",
         });
       }
 
-      const res = await fetch(`${API}/attendance/enroll-face-enhanced`, {
+      const res = await fetch(`${API_BASE}/attendance/enroll-face-enhanced`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ employee_id: selectedEmployee.employee_id, image: base64 }),

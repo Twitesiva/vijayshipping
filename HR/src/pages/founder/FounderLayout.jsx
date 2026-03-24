@@ -89,11 +89,12 @@ export default function FounderLayout() {
                     onClick={() => setIsMobileOpen(false)}
                 />
             )}
-            {/* SIDEBAR */}
+            {/* SIDEBAR - always fixed, slides on mobile */}
             <aside
-                className={`bg-white border-r min-h-[100dvh] fixed md:sticky inset-y-0 left-0 top-0 z-50 transition-all duration-300 ease-in-out
-                    ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-                    w-[280px] ${isSidebarOpen ? 'md:w-[280px]' : 'md:w-[72px]'}`}
+                className={`bg-white border-r shadow-sm flex flex-col fixed inset-y-0 left-0 top-0 z-50 transition-all duration-300 ease-in-out
+                  ${isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+                  w-[280px] ${isSidebarOpen ? 'md:w-[280px]' : 'md:w-[72px]'}
+                  min-h-[100dvh]`}
             >
                 <div className="h-full flex flex-col overflow-hidden">
                     {/* Brand */}
@@ -142,8 +143,8 @@ export default function FounderLayout() {
                 </div>
             </aside>
 
-            {/* MAIN CONTENT */}
-            <main className="flex-1 min-w-0 flex flex-col">
+            {/* MAIN CONTENT - has left margin on desktop */}
+            <main className="flex-1 min-w-0 flex flex-col md:ml-[280px]">
                 <header className="bg-white border-b sticky top-0 z-40 shrink-0">
                     <div className="px-4 md:px-6 py-3 md:py-4 flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 md:gap-3">

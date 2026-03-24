@@ -11,7 +11,7 @@ import {
     ShieldAlert,
     ShieldCheck
 } from "lucide-react";
-import API_BASE_URL from "../../config";
+import { API_BASE } from "../../config";
 
 export default function QuickAttendance() {
     const navigate = useNavigate();
@@ -66,7 +66,7 @@ export default function QuickAttendance() {
         setGeofenceError("");
         
         try {
-            const url = `${API_BASE_URL}/api/v1/attendance/check-geofence?lat=${coordinates.latitude}&lng=${coordinates.longitude}`;
+            const url = `${API_BASE}/attendance/check-geofence?lat=${coordinates.latitude}&lng=${coordinates.longitude}`;
             const response = await fetch(url);
             const result = await response.json();
             
@@ -248,7 +248,7 @@ export default function QuickAttendance() {
             const base64Image = canvas.toDataURL("image/jpeg", 0.6).split(",")[1];
             if (!base64Image) throw new Error("Failed to capture image data");
 
-            const response = await fetch(`${API_BASE_URL}/api/v1/attendance/detect-face`, {
+            const response = await fetch(`${API_BASE}/attendance/detect-face`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ image: base64Image }),
@@ -326,7 +326,7 @@ export default function QuickAttendance() {
 
             const finalImage = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
 
-            const response = await fetch(`${API_BASE_URL}/api/v1/attendance/mark-quick`, {
+            const response = await fetch(`${API_BASE}/attendance/mark-quick`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
