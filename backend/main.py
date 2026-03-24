@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from datetime import datetime, timedelta, timezone as dt_timezone
@@ -534,7 +534,21 @@ async def get_my_attendance_stats(
     date_from: str,
     date_to: str
 ):
-    """Fetch summarized attendance stats for an employee"""
+    """Fetch summarized attendance stats for an employee (query params)"""
+    return await admin_service.get_employee_stats(
+        employee_id=employee_id,
+        date_from=date_from,
+        date_to=date_to
+    )
+
+
+@app.get("/api/v1/attendance/stats/{employee_id}")
+async def get_attendance_stats_by_id(
+    employee_id: str,
+    date_from: str = Query(...),
+    date_to: str = Query(...)
+):
+    """Fetch summarized attendance stats for an employee (path param)"""
     return await admin_service.get_employee_stats(
         employee_id=employee_id,
         date_from=date_from,

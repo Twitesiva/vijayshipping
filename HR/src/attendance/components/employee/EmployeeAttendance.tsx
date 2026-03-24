@@ -547,7 +547,7 @@ export default function EmployeeAttendance({ showHistory = true, showOverview = 
       const empId = userObj?.employee_id;
       if (!empId) return;
 
-      const res = await apiFetch(`/attendance/status?employee_id=${empId}`);
+      const res = await apiFetch(`/attendance/status/${empId}`);
       const data = await res.json();
       if (data?.employee_id || data?.full_name) {
         if (data?.employee_id) {
