@@ -78,7 +78,7 @@ export default function EmployeeDashboard() {
 
       const [statusRes, statsRes, historyRes] = await Promise.all([
         apiFetch(`/attendance/status/${empId}`),
-        apiFetch(`/attendance/stats/${empId}?date_from=${from}&date_to=${to}`),
+        apiFetch(`/attendance/stats?employee_id=${empId}&date_from=${from}&date_to=${to}`),
         apiFetch(`/attendance/my-attendance?employee_id=${empId}&date_from=${from}&date_to=${to}&limit=50`)
       ]);
 
